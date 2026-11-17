@@ -3785,7 +3785,7 @@ const Store = {
       else if (this.mode === "browser"){ try { localStorage.setItem("gilded-cage-" + k, JSON.stringify(obj)); } catch (e) { flash("This browser's storage is full, so the latest change wasn't saved."); } } }); return this.docChain[k]; },
   delDoc(k){ delete this.mem[k]; this.docChain[k] = (this.docChain[k] || this.readyP).then(async () => { try { if (this.mode === "account") await this.ref(k).delete(); else if (this.mode === "browser") localStorage.removeItem("gilded-cage-" + k); } catch (e) {} }); },
   ref(k){ return this.db.doc(`data/users/${this.uid}/${k}`); },
-  merge(k, items){ const map = new Map(); for (const it of [...this.data[k], ...items]){ if (!it || !it.id) continue; const prev = map.get(it.id); map.set(it.id, prev ? Object.assign({}, it, prev) : it); } this.data[k] = [...map.values()].sort((a, b) => (b.at || 0) - (a.at || 0)); },
+  merge(k, items){ const map = new Map(); for (const it of [...this.data[k], ...items]){ if (!it || !it.id) continue; const prev = map.get(it.id); map.set(it.id, prev ? Object.assign({}, prev, it) : it); } this.data[k] = [...map.values()].sort((a, b) => (b.at || 0) - (a.at || 0)); },
   trim(k){ const cap = { history: 150, names: 600, drafts: 30 }[k]; const l = this.data[k]; if (l.length > cap){ const keep = l.filter(x => x.starred); const rest = l.filter(x => !x.starred).slice(0, Math.max(0, cap - keep.length)); this.data[k] = [...keep, ...rest].sort((a, b) => (b.at || 0) - (a.at || 0)); } },
   save(k){
     this.trim(k); if (!this.loaded){ this.dirty.add(k); return; } this.dirty.delete(k);
@@ -3941,7 +3941,7 @@ function dab(i){ const r = ME.size, k = ME.strength;
   if (["raise", "lower", "flatten", "smooth"].includes(ME.tool) && !(ME.tool === "lower" && $("#lowerSea") && $("#lowerSea").checked)) cellsIn(i, r, j => holdBiome(j));
   if (ME.tool === "raise") cellsIn(i, r, (j, f) => setElev(j, curElev(j) + 0.012 * k * Math.pow(f, 1.3) * texture(j)));
   else if (ME.tool === "lower"){ const sea = $("#lowerSea") && $("#lowerSea").checked; cellsIn(i, r, (j, f) => { const e = curElev(j), v = e - 0.012 * k * Math.pow(f, 1.3) * texture(j); setElev(j, sea || e < 0 ? v : Math.max(Math.min(e, 0.03), v)); }); }
-  else if (ME.tool === "mountain") cellsIn(i, r, (j, f) => setElev(j, Math.max(curElev(j), 0.05) + 0.03 * k * Math.pow(f, 2) * (0.6 + 0.8 * lattice(cx(j), cy(j), 91))));
+  else if (ME.tool === "mountain") cellsIn(i, r, (j, f) => { const e = curElev(j); if (e < 0) return; setElev(j, Math.max(e, 0.05) + 0.03 * k * Math.pow(f, 2) * (0.6 + 0.8 * lattice(cx(j), cy(j), 91))); });
   else if (ME.tool === "hills"){ const GREEN = ["grassland", "meadow", "tforest", "trainforest", "taiga", "monsoon", "jungle", "savanna"]; cellsIn(i, r, (j, f) => { const e = curElev(j); if (e < 0) return; const roll = 0.25 + 1.5 * m3Noise(cx(j) * 0.42 + 3.1, cy(j) * 0.42 - 7.7);
       if (e < 0.4) setElev(j, Math.min(0.4, e + 0.011 * k * Math.pow(f, 1.2) * roll)); const cur = BIOME_KEYS[ME.biome[j] - 1], b = G.P.biome[j]; if (!GREEN.includes(cur)) ME.biome[j] = biomeIdx(GREEN.includes(b) ? b : "grassland"); }); }
   else if (ME.tool === "flatten"){ if (ME.flatT == null) ME.flatT = curElev(i); const t = ME.flatT; cellsIn(i, r, (j, f) => setElev(j, curElev(j) + (t - curElev(j)) * Math.min(1, (0.55 * f + 0.1) * k / 5))); }
@@ -4017,12 +4017,14 @@ function initMapTools(){
     if (drag.kind === "path"){ extendPath(drag.cells, i); blitMap(); drawPathPreview(drag.cells); return; }
     if (drag.kind === "terrain" && i !== drag.last){ drag.last = i; dab(i); const t = performance.now(); if (t - lastDraw > (typeof strokeGap === "function" ? strokeGap() : 140)){ lastDraw = t; commitMap(true); } } });
   const end = ev => { if (!drag) return; const d = drag; drag = null;
-    if (d.kind === "pan" && !d.moved && ME.tool === "look"){ const i = cellFromEvent(ev); if (i >= 0) pick(i); }
+    if (d.kind === "pan" && !d.moved && ev.type === "pointerup" && ME.tool === "look"){ const i = cellFromEvent(ev); if (i >= 0) pick(i); }
     if (d.kind === "zones"){ paint.down = false; saveZones(); }
     if (d.kind === "terrain"){ ME.stroking = false; ME.flatT = null; if (ME.thicken){ ME.thicken = false; flash("Thicker here. Right-click again for more."); } commitMap(); }
     if (d.kind === "path"){ finishPath(d.cells, ME.tool); commitMap(); } };
   cv.addEventListener("dblclick", ev => { if (ME.tool !== "look") return; const [px, py] = canvasXY(ev); const h = labelAt(px, py); if (h){ ev.preventDefault(); openRename(h); } });
-  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", () => { drag = null; });
+  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end); cv.addEventListener("lostpointercapture", end);
+  window.addEventListener("blur", () => { if (drag) end({ type: "pointercancel" }); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden && drag) end({ type: "pointercancel" }); });
   showOpts(); }
 function fillRegions(){ const sel = $("#regionPick"); if (!sel || !G) return; const { C } = G; const cur = ME.region;
   sel.innerHTML = `<option value="">Pick a region to paint…</option><optgroup label="Your regions">${C.states.filter(s => s.type === "region").map(s => `<option value="${esc(s.regionId)}" ${s.regionId === cur ? "selected" : ""}>${esc(s.name)} (${esc(s.category)})</option>`).join("")}</optgroup><optgroup label="Existing states">${C.states.filter(s => s.type !== "region").map(s => `<option value="${s.sid}" ${String(s.sid) === cur ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</optgroup><option value="none" ${cur === "none" ? "selected" : ""}>Unclaimed land (erase borders)</option>`; }
@@ -8316,8 +8318,8 @@ function renderGallery(){ const el = document.getElementById("t-images"); if (!e
 })();
 
 /* ===== 3D map: the same painted map raised into terrain you can turn, tilt, zoom and paint on ===== */
-const M3 = { on: false, gl: null, gl2: false, prog: null, bprog: null, loc: null, bloc: null, vb: null, ib: null, sb: null, bb: null, nIdx: 0, nSkirt: 0, nB: 0, idx32: false, tex: null, texCanvas: null,
-  yaw: 0, pitch: 0.95, dist: 12.5, tx: 0, tz: 0.4, raf: 0, rebuild: false, retex: false, hits: [], w: 0, h: 0, dpr: 1, mvp: null, hc: null, hf: null, fx: 0, fy: 0, sub: 1, gw: 0, gh: 0, hs: 1, fly: null, shot: null,
+const M3 = { on: false, gl: null, gl2: false, prog: null, bprog: null, loc: null, bloc: null, vb: null, ib: null, sb: null, bb: null, nIdx: 0, nSkirt: 0, nB: 0, idx32: false, tex: null, texCanvas: null, procTex: null, hasWater: false, labelT: 0,
+  yaw: 0, pitch: 0.95, dist: 12.5, tx: 0, tz: 0.4, targetYaw: 0, targetPitch: 0.95, targetDist: 12.5, targetTx: 0, targetTz: 0.4, lift: 0, targetLift: 0, camTime: 0, projKey: "", proj: null, raf: 0, rebuild: false, retex: false, hits: [], w: 0, h: 0, dpr: 1, mvp: null, hc: null, hf: null, fx: 0, fy: 0, sub: 1, gw: 0, gh: 0, hs: 1, fly: null, shot: null,
   elevRef: null, hsBuilt: 0, fast: false, subBuilt: 0, brush: null, stroke: null, path: null };
 const M3_U = 10; // map cells per 3D unit
 /* how tall the land stands: the Height slider, remembered in this browser (the sea stays flat) */
@@ -8342,9 +8344,14 @@ function m3Detail(gx, gy, e, mtn){ if (e <= 0) return 0; let f = 0, amp = 0.5, f
   let ra = 0.5, rf = 0.55; for (let o = 0; o < 3; o++){ const n = 1 - Math.abs(2 * m3Noise(gx * rf - 9.7, gy * rf + 31.9) - 1); r += n * n * ra; rf *= 2.1; ra *= 0.5; }
   const coast = Math.min(1, e / 0.06); let g = 0, ga = 0.5, gf = 2.6; for (let o = 0; o < 2; o++){ const n = Math.abs(2 * m3Noise(gx * gf + 5.5, gy * gf - 2.2) - 1); g += n * ga; gf *= 2.2; ga *= 0.5; }
   return (f * (0.035 + 0.06 * mtn) + (r - 0.36) * 0.3 * mtn + (g - 0.4) * 0.07 * mtn) * coast * M3.hs; }
+function m3FarmRelief(gx, gy, P){ const x = Math.max(0, Math.min(W - 1, Math.round(gx))), y = Math.max(0, Math.min(H - 1, Math.round(gy))), i = ix(x, y), b = ME.biome && ME.biome[i] ? BIOME_KEYS[ME.biome[i] - 1] : P.biome[i]; if (b !== "farmland") return 0;
+  const bx = Math.floor(gx / 5), by = Math.floor(gy / 5), edgeX = gx - bx * 5, edgeY = gy - by * 5, fade = Math.max(0, Math.min(1, Math.min(edgeX, 5 - edgeX, edgeY, 5 - edgeY) / 0.55));
+  const vertical = m3Hash(bx + 51, by - 17) < 0.5, across = vertical ? gx : gy, phase = m3Hash(bx + 13, by + 29) * Math.PI * 2;
+  return Math.cos(across * Math.PI * 2 / 0.28 + phase) * 0.006 * fade * M3.hs; }
 /* small matrix helpers, column-major */
 function m3Mul(a, b){ const o = new Float32Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++){ let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; }
 function m3Persp(fov, asp, n, f){ const t = 1 / Math.tan(fov / 2); return new Float32Array([t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0]); }
+function m3Projection(dist){ const near = Math.max(0.002, Math.min(0.08, dist * 0.004)), far = Math.max(40, Math.min(300, dist * 18 + 24)), aspect = M3.w / Math.max(1, M3.h), key = [aspect, near, far].join(":"); if (M3.projKey !== key){ M3.projKey = key; M3.proj = m3Persp(0.7, aspect, near, far); } return M3.proj; }
 function m3Look(e, c){ let z = [e[0] - c[0], e[1] - c[1], e[2] - c[2]]; let l = Math.hypot(...z); z = z.map(v => v / l);
   let x = [z[2], 0, -z[0]]; l = Math.hypot(...x) || 1; x = x.map(v => v / l); const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
   const d = v => v[0] * e[0] + v[1] * e[1] + v[2] * e[2]; return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -d(x), -d(y), -d(z), 1]); }
@@ -8356,33 +8363,49 @@ function m3Inv(m){ const a = m, o = new Float32Array(16);
   o[4] = (a[6] * b08 - a[4] * b11 - a[7] * b07) * d; o[5] = (a[0] * b11 - a[2] * b08 + a[3] * b07) * d; o[6] = (a[14] * b02 - a[12] * b05 - a[15] * b01) * d; o[7] = (a[8] * b05 - a[10] * b02 + a[11] * b01) * d;
   o[8] = (a[4] * b10 - a[5] * b08 + a[7] * b06) * d; o[9] = (a[1] * b08 - a[0] * b10 - a[3] * b06) * d; o[10] = (a[12] * b04 - a[13] * b02 + a[15] * b00) * d; o[11] = (a[9] * b02 - a[8] * b04 - a[11] * b00) * d;
   o[12] = (a[5] * b07 - a[4] * b09 - a[6] * b06) * d; o[13] = (a[0] * b09 - a[1] * b07 + a[2] * b06) * d; o[14] = (a[13] * b01 - a[12] * b03 - a[14] * b00) * d; o[15] = (a[8] * b03 - a[9] * b01 + a[10] * b00) * d; return o; }
+function m3ProcTexture(gl){ const size = 512, data = new Uint8Array(size * size * 4);
+  const hash = (x, y) => { let n = (x * 374761393 + y * 668265263) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967295; };
+  const noise = (x, y, cells) => { const fx = x / size * cells, fy = y / size * cells, x0 = Math.floor(fx), y0 = Math.floor(fy), u = fx - x0, v = fy - y0, sx = u * u * (3 - 2 * u), sy = v * v * (3 - 2 * v), at = (a, b) => hash((a % cells + cells) % cells, (b % cells + cells) % cells);
+    return (at(x0, y0) * (1 - sx) + at(x0 + 1, y0) * sx) * (1 - sy) + (at(x0, y0 + 1) * (1 - sx) + at(x0 + 1, y0 + 1) * sx) * sy; };
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++){ const macro = noise(x, y, 4), mid = noise(x, y, 16), fine = noise(x, y, 64), grit = noise(x, y, 256), i = (y * size + x) * 4;
+    data[i] = Math.round(255 * (macro * 0.52 + mid * 0.31 + fine * 0.17)); data[i + 1] = Math.round(255 * (mid * 0.3 + fine * 0.48 + grit * 0.22)); data[i + 2] = Math.round(255 * (fine * 0.28 + grit * 0.72)); data[i + 3] = 255; }
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.generateMipmap(gl.TEXTURE_2D); return tex; }
 function m3Init(){ if (M3.gl) return true; const cv = $("#m3gl"); if (!cv) return false; const opt = { alpha: true, antialias: true, premultipliedAlpha: true };
   let gl = cv.getContext("webgl2", opt); M3.gl2 = !!gl; if (!gl) gl = cv.getContext("webgl", opt) || cv.getContext("experimental-webgl"); if (!gl) return false;
   M3.idx32 = M3.gl2 || !!gl.getExtension("OES_element_index_uint"); M3.lowQ = !M3.forceHQ && m3SoftGL(gl); M3.aniso = gl.getExtension("EXT_texture_filter_anisotropic") || gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic");
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
   const prog = (vs, fs) => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); return gl.getProgramParameter(p, gl.LINK_STATUS) ? p : null; };
-  const p = prog("attribute vec3 aP;attribute vec2 aT;attribute vec3 aN;attribute vec2 aR;uniform mat4 uM;varying vec2 vT;varying vec3 vN;varying vec3 vP;varying vec2 vR;void main(){gl_Position=uM*vec4(aP,1.0);vT=aT;vN=aN;vP=aP;vR=aR;}",
-    "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\nvarying vec2 vT;varying vec3 vN;varying vec3 vP;varying vec2 vR;uniform sampler2D uX;uniform vec4 uS;uniform vec3 uL;uniform float uHs;uniform float uLow;" +
+  const p = prog(
+    "attribute vec3 aP;attribute vec2 aT;attribute vec3 aN;attribute vec4 aR;uniform mat4 uM;uniform float uT;varying vec2 vT;varying vec3 vN;varying vec3 vP;varying vec4 vR;void main(){vec3 p=aP;p.y+=aR.z*sin((aP.x*0.74+aP.z*0.39)*38.0+uT*1.1)*cos((aP.z*0.61-aP.x*0.28)*17.0-uT*0.7)*0.00045;gl_Position=uM*vec4(p,1.0);vT=aT;vN=aN;vP=p;vR=aR;}",
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\nvarying vec2 vT;varying vec3 vN;varying vec3 vP;varying vec4 vR;uniform sampler2D uX;uniform sampler2D uP;uniform vec4 uS;uniform vec3 uL;uniform vec3 uEye;uniform float uHs;uniform float uLow;uniform float uT;" +
     "float hs(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}float ns(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hs(i),hs(i+vec2(1.0,0.0)),f.x),mix(hs(i+vec2(0.0,1.0)),hs(i+vec2(1.0,1.0)),f.x),f.y);}" +
-    "void main(){vec3 n=normalize(vN);float d=max(dot(n,uL),0.0);if(uS.a>0.5){gl_FragColor=vec4(uS.rgb*(0.56+0.58*d),1.0);return;}vec3 c=texture2D(uX,vT).rgb;float sl=1.0-n.y;float h=vP.y/uHs;if(uLow>0.5){float lr=clamp(vR.x*(0.4+sl*2.0)+smoothstep(0.45,0.7,sl),0.0,1.0)*step(0.014,vP.y);c=mix(c,vec3(0.47,0.44,0.41),lr*0.9);float ls=clamp(vR.y*1.2+smoothstep(0.94,1.16,h),0.0,1.0)*(1.0-smoothstep(0.4,0.65,sl))*step(0.014,vP.y);c=mix(c,vec3(0.93,0.95,0.99),ls);gl_FragColor=vec4(c*(0.50+0.66*d),1.0);return;}" +
-    "float n1=ns(vP.xz*34.0),n2=ns(vP.xz*110.0),n3=ns(vP.xz*9.0);float land=step(0.014,vP.y);" +
-    "float band=0.5+0.5*sin(h*64.0+n1*5.0+n3*7.0);vec3 rock=mix(vec3(0.33,0.30,0.29),vec3(0.60,0.56,0.51),band*0.55+n2*0.45);rock=mix(rock,vec3(0.50,0.42,0.34),n3*0.45);" +
-    "float rk=clamp(vR.x*(0.45+smoothstep(0.06,0.30,sl+n1*0.08))+smoothstep(0.42,0.66,sl),0.0,1.0)*land;" +
-    "vec3 scree=mix(vec3(0.47,0.45,0.40),vec3(0.38,0.42,0.30),n1);c=mix(c,scree,vR.x*0.55*land);c=mix(c,rock,rk*0.92);" +
-    "float sn=clamp(vR.y*1.25+smoothstep(0.94,1.16,h+n1*0.10),0.0,1.0)*(1.0-smoothstep(0.34,0.62,sl+n2*0.10))*land;c=mix(c,vec3(0.93,0.95,0.99),sn*0.95);" +
-    "c*=mix(1.0,0.9+0.2*n2,land*0.6);vec3 lit=c*(0.50+0.66*d)+vec3(0.02,0.03,0.05)*(1.0-d);gl_FragColor=vec4(lit,1.0);}");
-  const bp = prog("attribute vec3 aP;attribute vec3 aN;attribute vec3 aC;uniform mat4 uM;uniform vec3 uL;varying vec3 vC;void main(){gl_Position=uM*vec4(aP,1.0);float d=max(dot(normalize(aN),uL),0.0);vC=aC*(0.52+0.60*d)+aC*vec3(0.0,0.02,0.05)*(1.0-d);}",
-    "precision mediump float;varying vec3 vC;void main(){gl_FragColor=vec4(vC,1.0);}");
+    "void main(){vec3 n=normalize(vN);if(uS.a<0.5&&uLow<0.5){vec2 buv=vT*vec2(80.0,80.0);float bh=texture2D(uP,buv).b,bx=texture2D(uP,buv+vec2(0.001953125,0.0)).b,bz=texture2D(uP,buv+vec2(0.0,0.001953125)).b;float bm=(1.0-smoothstep(0.15,0.55,vR.x))*(1.0-smoothstep(0.1,0.45,vR.z));n=normalize(n+vec3((bh-bx)*3.0,0.0,(bh-bz)*3.0)*bm);}float d=max(dot(n,uL),0.0);if(uS.a>0.5){float hemi=0.5+0.5*n.y;gl_FragColor=vec4(uS.rgb*(0.30+0.62*d+0.16*hemi),1.0);return;}float coastWarp=(ns(vP.xz*3.8)-0.5)*0.16;float ocean=smoothstep(0.12+coastWarp,0.72+coastWarp,vR.w)*(1.0-smoothstep(0.012,0.05,vP.y));float inland=smoothstep(0.12+coastWarp,0.72+coastWarp,max(0.0,vR.z-vR.w));float water=max(ocean,inland);float sl=1.0-n.y;float h=vP.y/uHs;vec3 c=texture2D(uX,vT).rgb;float grain=uLow<0.5&&water<0.99?texture2D(uP,vT*vec2(18.0,18.0)).r:0.5;float land=step(0.014,vP.y);" +
+    "if(uLow<0.5){float n1=ns(vP.xz*34.0),n2=ns(vP.xz*110.0),n3=ns(vP.xz*9.0);float band=0.5+0.5*sin(h*64.0+n1*5.0+n3*7.0);vec3 rock=mix(vec3(0.33,0.30,0.29),vec3(0.60,0.56,0.51),band*0.55+n2*0.45);rock=mix(rock,vec3(0.50,0.42,0.34),n3*0.45);" +
+    "float rk=clamp(vR.x*(0.45+smoothstep(0.06,0.30,sl+n1*0.08))+smoothstep(0.42,0.66,sl),0.0,1.0)*land;vec3 scree=mix(vec3(0.47,0.45,0.40),vec3(0.38,0.42,0.30),n1);c=mix(c,scree,vR.x*0.55*land);c=mix(c,rock,rk*0.92);" +
+    "float sn=clamp(vR.y*1.25+smoothstep(0.94,1.16,h+n1*0.10),0.0,1.0)*(1.0-smoothstep(0.34,0.62,sl+n2*0.10))*land;c=mix(c,vec3(0.93,0.95,0.99),sn*0.95);c*=mix(1.0,0.9+0.2*n2,land*0.6);" +
+    "}else{float lr=clamp(vR.x*(0.4+sl*2.0)+smoothstep(0.45,0.7,sl),0.0,1.0)*land;c=mix(c,vec3(0.47,0.44,0.41),lr*0.9);float ls=clamp(vR.y*1.2+smoothstep(0.94,1.16,h),0.0,1.0)*(1.0-smoothstep(0.4,0.65,sl))*land;c=mix(c,vec3(0.93,0.95,0.99),ls);}" +
+    "float lowland=land*(1.0-smoothstep(0.08,0.58,vR.x));if(uLow<0.5){float patch=texture2D(uP,vT*vec2(24.0,24.0)).r;float fleck=texture2D(uP,vT*vec2(96.0,96.0)).r;float green=clamp((c.g-c.r)*3.2,0.0,1.0);vec3 tint=mix(vec3(1.10,0.96,0.82),vec3(0.87,1.06,0.79),green);float pigment=0.56+0.72*patch+0.20*(fleck-0.5);c*=mix(vec3(1.0),tint*pigment,lowland*0.52);}else{c*=mix(1.0,0.88+0.24*grain,lowland*0.5);}float drySand=smoothstep(0.0,0.03,vR.z)*(1.0-smoothstep(0.05,0.13,vR.z));float wetSand=smoothstep(0.07,0.15,vR.z)*(1.0-smoothstep(0.17,0.29,vR.z));c=mix(c,vec3(0.70,0.62,0.45),drySand*land*0.36);c=mix(c,vec3(0.37,0.30,0.22),wetSand*land*0.52);" +
+    "vec2 wp=vP.xz;float flowA=ns(wp*5.0+vec2(uT*0.035,-uT*0.026));float flowB=ns(wp*5.0+vec2(13.1-uT*0.024,7.7+uT*0.031));vec2 warped=wp*vec2(13.0,8.0)+(vec2(flowA,flowB)-0.5)*3.2+vec2(uT*0.12,-uT*0.08);float waveA=ns(warped);float waveB=ns(warped*2.1+vec2(5.2,-2.4)-vec2(uT*0.05,uT*0.03));float wave=smoothstep(0.15,0.88,waveA*0.72+waveB*0.28);float depth=smoothstep(0.18,0.84,vR.z);vec3 shallow=mix(vec3(0.14,0.50,0.59),vec3(0.25,0.72,0.74),wave);vec3 deep=mix(vec3(0.015,0.10,0.25),vec3(0.07,0.32,0.55),wave);vec3 waterCol=mix(shallow,deep,depth);float glint=smoothstep(0.76,0.94,waveB);waterCol+=vec3(0.08,0.18,0.20)*glint;float shoal=1.0-smoothstep(0.16,0.62,vR.z);float stones=smoothstep(0.78,0.94,ns(wp*47.0+vec2(5.3,-8.1)));waterCol=mix(waterCol,vec3(0.16,0.26,0.28),stones*shoal*0.34);float shore=smoothstep(0.08,0.18,vR.z)*(1.0-smoothstep(0.22,0.40,vR.z));float foam=smoothstep(0.52,0.78,ns(wp*24.0+vec2(uT*0.012,-uT*0.009)));waterCol=mix(waterCol,vec3(0.74,0.90,0.86),shore*foam*0.62);c=mix(c,waterCol,water);" +
+    "vec3 V=normalize(uEye-vP);vec3 H=normalize(uL+V);float hemi=0.5+0.5*n.y;float ao=clamp(0.78+0.22*n.y,0.55,1.0);float diffuse=0.34+0.60*d+0.14*hemi;float spec=pow(max(dot(n,H),0.0),mix(42.0,18.0,sl))*0.16;float waterSpec=pow(max(dot(n,H),0.0),54.0)*0.65;vec3 lit=c*diffuse*ao+vec3(0.025,0.035,0.045)*(1.0-d)+vec3(0.9,0.84,0.68)*spec*(1.0-water)+vec3(0.55,0.82,0.95)*waterSpec*water;gl_FragColor=vec4(lit,1.0);}");
+  const bp = prog(
+    "attribute vec3 aP;attribute vec3 aN;attribute vec3 aC;uniform mat4 uM;varying vec3 vP;varying vec3 vN;varying vec3 vC;void main(){gl_Position=uM*vec4(aP,1.0);vP=aP;vN=normalize(aN);vC=aC;}",
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\nvarying vec3 vP;varying vec3 vN;varying vec3 vC;uniform sampler2D uP;uniform vec3 uL;uniform vec3 uEye;uniform float uLow;" +
+    "void main(){vec3 n=normalize(vN);float d=max(dot(n,uL),0.0);float hemi=0.5+0.5*n.y;float grain=uLow>0.5?0.5:texture2D(uP,vP.xz*31.0).r;vec3 V=normalize(uEye-vP);vec3 H=normalize(uL+V);float spec=pow(max(dot(n,H),0.0),26.0)*0.10;float vegetation=smoothstep(0.035,0.18,vC.g-max(vC.r,vC.b));vec3 tw=abs(n);tw*=tw;tw/=max(tw.x+tw.y+tw.z,0.001);float leaf=0.5;if(uLow<0.5)leaf=texture2D(uP,vP.zy*96.0).g*tw.x+texture2D(uP,vP.xz*96.0).g*tw.y+texture2D(uP,vP.xy*96.0).g*tw.z;float fleck=smoothstep(0.34,0.72,leaf);vec3 leafTint=mix(vec3(0.76,0.88,0.68),vec3(1.16,1.14,0.88),fleck);float leafShade=mix(0.82,1.16,leaf);vec3 c=vC*(0.28+0.58*d+0.18*hemi)*(0.91+0.16*grain);c*=mix(vec3(1.0),leafTint*leafShade,vegetation*0.56);" +
+    "float brightness=(vC.r+vC.g+vC.b)/3.0, spread=max(vC.r,max(vC.g,vC.b))-min(vC.r,min(vC.g,vC.b)), neutral=1.0-smoothstep(0.10,0.30,spread), wall=smoothstep(0.38,0.62,brightness)*neutral*(1.0-vegetation)*(1.0-smoothstep(0.62,0.90,abs(n.y)));vec2 wallUV=vP.zy*tw.x+vP.xy*tw.z;float textureNoise=uLow>0.5?0.5:texture2D(uP,wallUV*35.0).r;float row=floor(wallUV.y*110.0);vec2 brick=fract(wallUV*vec2(150.0,110.0)+vec2(mod(row,2.0)*0.5,0.0));float mortar=max(1.0-step(0.09,brick.x),1.0-step(0.14,brick.y));vec3 stone=mix(vec3(0.35,0.34,0.32),mix(vec3(0.73,0.68,0.59),vec3(0.94,0.86,0.72),textureNoise),1.0-mortar);float plaster=smoothstep(0.64,0.82,brightness);vec3 plasterTone=mix(vec3(0.78,0.70,0.58),vec3(1.0,0.92,0.80),textureNoise);vec3 wallTone=mix(stone,plasterTone,plaster);float stain=uLow>0.5?0.5:texture2D(uP,wallUV*19.0+vec2(7.3,2.1)).r;wallTone*=mix(0.82,1.08,stain);c*=mix(vec3(1.0),wallTone,wall*0.48);" +
+    "float roofSlope=smoothstep(0.14,0.42,abs(n.y))*(1.0-smoothstep(0.82,0.96,abs(n.y))),warmRoof=smoothstep(0.10,0.30,vC.r-vC.g)*smoothstep(0.30,0.55,vC.r),slateRoof=neutral*(1.0-smoothstep(0.43,0.68,brightness));float roof=clamp(max(warmRoof,slateRoof)*roofSlope,0.0,1.0);vec2 tileUV=vP.xz*vec2(145.0,145.0);float tileRow=floor(tileUV.y);vec2 tile=fract(tileUV+vec2(mod(tileRow,2.0)*0.5,0.0));float seam=max(1.0-step(0.055,tile.x),1.0-step(0.11,tile.y));float tileNoise=uLow>0.5?0.5:texture2D(uP,tileUV*0.12).r;c*=1.0-roof*seam*0.34;c*=mix(1.0,0.88+0.22*tileNoise,roof*0.30);gl_FragColor=vec4(c+vec3(0.92,0.82,0.66)*spec,1.0);}");
   if (!p || !bp) return false;
-  M3.gl = gl; M3.prog = p; M3.bprog = bp; M3.loc = { P: gl.getAttribLocation(p, "aP"), T: gl.getAttribLocation(p, "aT"), N: gl.getAttribLocation(p, "aN"), R: gl.getAttribLocation(p, "aR"), M: gl.getUniformLocation(p, "uM"), L: gl.getUniformLocation(p, "uL"), X: gl.getUniformLocation(p, "uX"), S: gl.getUniformLocation(p, "uS"), H: gl.getUniformLocation(p, "uHs"), Low: gl.getUniformLocation(p, "uLow") };
-  M3.bloc = { P: gl.getAttribLocation(bp, "aP"), N: gl.getAttribLocation(bp, "aN"), C: gl.getAttribLocation(bp, "aC"), M: gl.getUniformLocation(bp, "uM"), L: gl.getUniformLocation(bp, "uL") };
-  M3.vb = gl.createBuffer(); M3.ib = gl.createBuffer(); M3.sb = gl.createBuffer(); M3.bb = gl.createBuffer(); M3.tex = gl.createTexture();
+  M3.gl = gl; M3.prog = p; M3.bprog = bp; M3.loc = { P: gl.getAttribLocation(p, "aP"), T: gl.getAttribLocation(p, "aT"), N: gl.getAttribLocation(p, "aN"), R: gl.getAttribLocation(p, "aR"), M: gl.getUniformLocation(p, "uM"), L: gl.getUniformLocation(p, "uL"), X: gl.getUniformLocation(p, "uX"), PT: gl.getUniformLocation(p, "uP"), Eye: gl.getUniformLocation(p, "uEye"), Time: gl.getUniformLocation(p, "uT"), S: gl.getUniformLocation(p, "uS"), H: gl.getUniformLocation(p, "uHs"), Low: gl.getUniformLocation(p, "uLow") };
+  M3.bloc = { P: gl.getAttribLocation(bp, "aP"), N: gl.getAttribLocation(bp, "aN"), C: gl.getAttribLocation(bp, "aC"), M: gl.getUniformLocation(bp, "uM"), L: gl.getUniformLocation(bp, "uL"), PT: gl.getUniformLocation(bp, "uP"), Eye: gl.getUniformLocation(bp, "uEye"), Low: gl.getUniformLocation(bp, "uLow") };
+  M3.vb = gl.createBuffer(); M3.ib = gl.createBuffer(); M3.sb = gl.createBuffer(); M3.bb = gl.createBuffer(); M3.tex = gl.createTexture(); M3.procTex = m3ProcTexture(gl);
   gl.bindTexture(gl.TEXTURE_2D, M3.tex); for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, M3.gl2 ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
   if (M3.aniso) gl.texParameterf(gl.TEXTURE_2D, M3.aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(M3.aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1));
   return true; }
 /* called by drawMap with the painted map, before the scale bar and compass go on */
+function m3WaterKey(){ return feats().filter(f => ["river", "stream", "canal", "strait"].includes(f.type)).map(f => { let sum = 0; if (f.cells) for (const i of f.cells) sum = (sum + i * 2654435761) >>> 0; return [f.id, f.type, f.i, f.cells ? f.cells.length + ":" + sum : ""].join(":"); }).join("|"); }
 function m3Snap(cv){ if (!M3.on) return; if (M3.hiDraw){ const t = M3.texCanvas || (M3.texCanvas = document.createElement("canvas")); if (t.width !== cv.width){ t.width = cv.width; t.height = cv.height; } t.getContext("2d").drawImage(cv, 0, 0); M3.hiReady = true; return; } const t = M3.texCanvas || (M3.texCanvas = document.createElement("canvas")); if (t.width !== cv.width || t.height !== cv.height){ t.width = cv.width; t.height = cv.height; }
-  t.getContext("2d").drawImage(cv, 0, 0); M3.retex = true; if (M3.elevRef !== G.P.elev || M3.hsBuilt !== M3.hs || (!M3.fast && M3.subBuilt !== m3SubFull())) M3.rebuild = true; M3.rebuildB = true; m3Frame(); m3HiLater(); }
+  t.getContext("2d").drawImage(cv, 0, 0); M3.retex = true; if (M3.elevRef !== G.P.elev || M3.biomeRef !== G.P.biome || M3.waterKey !== m3WaterKey() || M3.hsBuilt !== M3.hs || (!M3.fast && M3.subBuilt !== m3SubFull())) M3.rebuild = true; M3.rebuildB = true; m3Frame(); m3HiLater(); }
 /* a sharper copy of the painted map for the 3D ground: the flat map drawn again at twice the size, shortly after changes settle */
 function m3HiLater(){ clearTimeout(M3.hiT); if (M3.fast || !M3.gl || M3.lowQ) return; const max = M3.gl.getParameter(M3.gl.MAX_TEXTURE_SIZE) || 4096; if (max < CW * 2) return; M3.hiT = setTimeout(m3HiTex, 280); }
 /* never in the middle of a flight or a brush stroke */
@@ -8393,14 +8416,22 @@ function m3HiTex(){ if (!M3.on || M3.fast || typeof mapBufCanvas === "undefined"
 /* computers without graphics acceleration draw 3D in software: give them the lighter ground and texture */
 function m3SoftGL(gl){ try { const e = gl.getExtension("WEBGL_debug_renderer_info"); const r = e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(String(r)); } catch (e) { return false; } }
 function m3Lag(ms){ if (M3.forceHQ || M3.lowQ) return; M3.slow = ms > 250 ? (M3.slow || 0) + 1 : 0; if (M3.slow >= 3){ M3.lowQ = true; M3.rebuild = true; clearTimeout(M3.hiT); if (G) drawMap(); } }
-function m3SubFull(){ if (M3.lowQ) return (W * 2 + 1) * (H * 2 + 1) <= 65535 ? 2 : 1; return Math.max(1, Math.min(4, Math.floor(Math.sqrt((M3.idx32 ? 300000 : 64000) / ((W + 1) * (H + 1)))))); }
+function m3SubFull(){ if (M3.lowQ) return (W * 2 + 1) * (H * 2 + 1) <= 65535 ? 2 : 1; return Math.max(1, Math.min(5, Math.floor(Math.sqrt((M3.idx32 ? 420000 : 90000) / ((W + 1) * (H + 1)))))); }
 function m3Build(){ const gl = M3.gl, P = G.P; M3.gw = W; M3.gh = H; M3.elevRef = P.elev; M3.hsBuilt = M3.hs; const hc = M3.hc = new Float32Array(N); for (let i = 0; i < N; i++) hc[i] = m3Height(P.elev[i]);
-  const rkc = new Float32Array(N), snc = new Float32Array(N); for (let i = 0; i < N; i++){ const b = P.biome[i]; if (b === "mountain" || b === "snow") rkc[i] = 1; if (b === "snow" || b === "ice") snc[i] = 1; } M3.rkc = rkc;
+  const rkc = new Float32Array(N), snc = new Float32Array(N), wc = new Float32Array(N), seaC = new Float32Array(N), lakeId = BIOME_KEYS.indexOf("lake") + 1; let hasWater = false;
+  for (let i = 0; i < N; i++){ const b = P.biome[i]; if (b === "mountain" || b === "snow") rkc[i] = 1; if (b === "snow" || b === "ice") snc[i] = 1;
+    if (P.elev[i] < 0){ wc[i] = 1; seaC[i] = 1; hasWater = true; }
+    else if (b === "lake" || (ME.biome && ME.biome[i] === lakeId) || (P.flux && P.riverT != null && P.elev[i] > 0 && P.flux[i] > P.riverT)){ wc[i] = 1; hasWater = true; } }
+  for (const f of feats()) if (f.cells && ["river", "stream", "canal", "strait"].includes(f.type)){ hasWater = true; for (const i of f.cells) if (i >= 0 && i < N) wc[i] = 1; }
+  M3.hasWater = hasWater; M3.rkc = rkc; M3.biomeRef = P.biome; M3.waterKey = m3WaterKey();
   const el = P.elev, sub = M3.fast ? Math.min(2, m3SubFull()) : m3SubFull(); M3.subBuilt = sub; const nx = W * sub + 1, ny = H * sub + 1; M3.sub = sub; M3.fx = nx; M3.fy = ny;
-  const SMC = typeof smoothArr === "function" ? smoothArr() : null; const hf = new Float32Array(nx * ny), rf = new Float32Array(nx * ny), sf = new Float32Array(nx * ny); for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++){ const gx = i / sub - 0.5, gy = j / sub - 0.5, q = j * nx + i; const e = m3Bicubic(el, gx, gy); let y = m3Bicubic(hc, gx, gy); const rk = rf[q] = m3Bicubic(rkc, gx, gy); sf[q] = m3Bicubic(snc, gx, gy); if (e > 0){ const smv = SMC ? Math.max(0, Math.min(1, m3Bicubic(SMC, gx, gy))) : 0; y += m3Detail(gx, gy, e, rk) * (1 - 0.9 * smv); if (smv) rf[q] = rk * (1 - 0.75 * smv); if (y < 0.012) y = 0.012; } hf[q] = y; }
+  const SMC = typeof smoothArr === "function" ? smoothArr() : null; const hf = new Float32Array(nx * ny), rf = new Float32Array(nx * ny), sf = new Float32Array(nx * ny), wf = new Float32Array(nx * ny), seaf = new Float32Array(nx * ny); for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++){ const gx = i / sub - 0.5, gy = j / sub - 0.5, q = j * nx + i; const e = m3Bicubic(el, gx, gy); let y = m3Bicubic(hc, gx, gy); const rk = rf[q] = m3Bicubic(rkc, gx, gy); sf[q] = m3Bicubic(snc, gx, gy); wf[q] = m3Bicubic(wc, gx, gy); seaf[q] = m3Bicubic(seaC, gx, gy);
+    if (e > 0){ const smv = SMC ? Math.max(0, Math.min(1, m3Bicubic(SMC, gx, gy))) : 0; y += m3Detail(gx, gy, e, rk) * (1 - 0.9 * smv) + m3FarmRelief(gx, gy, P); if (smv) rf[q] = rk * (1 - 0.75 * smv); if (y < 0.012) y = 0.012; }
+    if (e <= 0) y = y * (1 - wf[q]) + 0.006 * wf[q];
+    const sx = Math.max(0, Math.min(W - 1, Math.round(gx))), sy = Math.max(0, Math.min(H - 1, Math.round(gy))); if (P.elev[ix(sx, sy)] < 0) y = 0.006; hf[q] = y; }
   if (typeof m3Carve === "function") try { m3Carve(hf, nx, ny, sub); } catch (e) { console.error(e); }
-  M3.hf = hf; const v = new Float32Array(nx * ny * 10), wx = gx => (gx + 0.5 - W / 2) / M3_U, wz = gy => (gy + 0.5 - H / 2) / M3_U, step = M3_U * sub / 2;
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++){ const gx = i / sub - 0.5, gy = j / sub - 0.5, k = (j * nx + i) * 10, q = j * nx + i; const y = hf[q]; v[k + 8] = rf[q]; v[k + 9] = sf[q];
+  M3.hf = hf; const v = new Float32Array(nx * ny * 12), wx = gx => (gx + 0.5 - W / 2) / M3_U, wz = gy => (gy + 0.5 - H / 2) / M3_U, step = M3_U * sub / 2;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++){ const gx = i / sub - 0.5, gy = j / sub - 0.5, k = (j * nx + i) * 12, q = j * nx + i; const y = hf[q]; v[k + 8] = rf[q]; v[k + 9] = sf[q]; v[k + 10] = wf[q]; v[k + 11] = seaf[q];
     const dx = (hf[j * nx + Math.min(nx - 1, i + 1)] - hf[j * nx + Math.max(0, i - 1)]) * step, dz = (hf[Math.min(ny - 1, j + 1) * nx + i] - hf[Math.max(0, j - 1) * nx + i]) * step; const l = Math.hypot(dx, 1, dz);
     v[k] = wx(gx); v[k + 1] = y; v[k + 2] = wz(gy); v[k + 3] = (gx + 0.5) / W; v[k + 4] = (gy + 0.5) / H; v[k + 5] = -dx / l; v[k + 6] = 1 / l; v[k + 7] = -dz / l; }
   const big = nx * ny > 65535, idx = big ? new Uint32Array((nx - 1) * (ny - 1) * 6) : new Uint16Array((nx - 1) * (ny - 1) * 6); let n = 0;
@@ -8408,38 +8439,52 @@ function m3Build(){ const gl = M3.gl, P = G.P; M3.gw = W; M3.gh = H; M3.elevRef 
   gl.bindBuffer(gl.ARRAY_BUFFER, M3.vb); gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, M3.ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW); M3.nIdx = n; M3.idxType = big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
   // the sides of the model, like a sand-table cut from the ground
   const ring = []; for (let i = 0; i < nx; i++) ring.push([i, 0, 0, -1]); for (let j = 0; j < ny; j++) ring.push([nx - 1, j, 1, 0]); for (let i = nx - 1; i >= 0; i--) ring.push([i, ny - 1, 0, 1]); for (let j = ny - 1; j >= 0; j--) ring.push([0, j, -1, 0]);
-  const s = []; const base = -0.32; const vert = (i, j, top, nxn, nzn) => { const k = (j * nx + i) * 10; s.push(v[k], top ? v[k + 1] : base, v[k + 2], 0, 0, nxn, 0, nzn, 0, 0); };
+  const s = []; const base = -0.32; const vert = (i, j, top, nxn, nzn) => { const k = (j * nx + i) * 12; s.push(v[k], top ? v[k + 1] : base, v[k + 2], 0, 0, nxn, 0, nzn, 0, 0, 0, 0); };
   for (let r = 0; r < ring.length - 1; r++){ const [i0, j0, ax, az] = ring[r], [i1, j1] = ring[r + 1]; vert(i0, j0, 1, ax, az); vert(i0, j0, 0, ax, az); vert(i1, j1, 1, ax, az); vert(i1, j1, 1, ax, az); vert(i0, j0, 0, ax, az); vert(i1, j1, 0, ax, az); }
-  gl.bindBuffer(gl.ARRAY_BUFFER, M3.sb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(s), gl.STATIC_DRAW); M3.nSkirt = s.length / 10; M3.rebuildB = true; }
-function m3Texture(){ const gl = M3.gl; if (!M3.texCanvas) return; gl.bindTexture(gl.TEXTURE_2D, M3.tex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, M3.texCanvas); const mip = M3.gl2 && !M3.lowQ; if (mip) gl.generateMipmap(gl.TEXTURE_2D);
+  gl.bindBuffer(gl.ARRAY_BUFFER, M3.sb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(s), gl.STATIC_DRAW); M3.nSkirt = s.length / 12; M3.rebuildB = true; }
+function m3Texture(){ const gl = M3.gl; if (!M3.texCanvas) return; gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, M3.tex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, M3.texCanvas); const mip = M3.gl2 && !M3.lowQ; if (mip) gl.generateMipmap(gl.TEXTURE_2D);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mip ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR); if (M3.aniso) gl.texParameterf(gl.TEXTURE_2D, M3.aniso.TEXTURE_MAX_ANISOTROPY_EXT, M3.lowQ ? 1 : Math.min(8, gl.getParameter(M3.aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1)); }
 function m3Size(){ const box = $("#map3d"), map = $("#map"); if (!box || !map) return; box.style.left = map.offsetLeft + "px"; box.style.top = map.offsetTop + "px"; box.style.width = map.offsetWidth + "px"; box.style.height = map.offsetHeight + "px";
   const dpr = Math.min(2, window.devicePixelRatio || 1), w = Math.max(1, map.offsetWidth), h = Math.max(1, map.offsetHeight); M3.w = w; M3.h = h; M3.dpr = dpr;
   for (const c of [$("#m3gl"), $("#m3lab")]){ const W2 = Math.round(w * dpr), H2 = Math.round(h * dpr); if (c.width !== W2 || c.height !== H2){ c.width = W2; c.height = H2; } } m3Frame(); }
-function m3Frame(){ if (!M3.on || M3.raf) return; const asked = performance.now(); M3.raf = requestAnimationFrame(() => { M3.raf = 0; if (M3.fly || M3.stroke || M3.drag) m3Lag(performance.now() - asked); try { m3Render(); } catch (e) { console.error(e); } }); }
+function m3TYAt(tx, tz){ if (!M3.hf) return 0.15; const gx = tx * M3_U + W / 2 - 0.5, gy = tz * M3_U + H / 2 - 0.5; let s = 0; for (const [a, b] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) s += Math.max(0, m3HAt(gx + a, gy + b)); return s / 5 + 0.02; }
+function m3TY(){ return m3TYAt(M3.tx, M3.tz) + M3.lift; }
+function m3RequiredLift(tx, tz, dist, yaw, pitch){ const cp = Math.cos(pitch), ex = tx + dist * Math.sin(yaw) * cp, ez = tz + dist * Math.cos(yaw) * cp;
+  const gx = ex * M3_U + W / 2 - 0.5, gy = ez * M3_U + H / 2 - 0.5, ground = Math.max(0, m3HAt(gx, gy)), clearance = Math.max(0.18, Math.min(0.48, dist * 0.012));
+  return Math.max(0, ground + clearance - (m3TYAt(tx, tz) + dist * Math.sin(pitch))); }
+function m3CameraStep(now){ const dt = Math.min(0.05, Math.max(0.001, (now - (M3.camTime || now - 16.67)) / 1000)), k = 1 - Math.exp(-14 * dt); M3.camTime = now;
+  const turn = Math.atan2(Math.sin(M3.targetYaw - M3.yaw), Math.cos(M3.targetYaw - M3.yaw)); M3.yaw += turn * k; M3.pitch += (M3.targetPitch - M3.pitch) * k;
+  M3.tx += (M3.targetTx - M3.tx) * k; M3.tz += (M3.targetTz - M3.tz) * k;
+  M3.dist = Math.exp(Math.log(M3.dist) + (Math.log(M3.targetDist) - Math.log(M3.dist)) * k);
+  const need = Math.max(m3RequiredLift(M3.targetTx, M3.targetTz, M3.targetDist, M3.targetYaw, M3.targetPitch), m3RequiredLift(M3.tx, M3.tz, M3.dist, M3.yaw, M3.pitch)); M3.targetLift = need;
+  if (M3.lift < need) M3.lift = need; else M3.lift += (need - M3.lift) * k;
+  return Math.abs(turn) > 0.0002 || Math.abs(M3.targetPitch - M3.pitch) > 0.0002 || Math.abs(M3.targetTx - M3.tx) + Math.abs(M3.targetTz - M3.tz) > 0.0005 || Math.abs(Math.log(M3.targetDist / M3.dist)) > 0.0002 || Math.abs(M3.targetLift - M3.lift) > 0.0005; }
+function m3Frame(){ if (!M3.on || M3.raf) return; const asked = performance.now(), draw = () => { M3.raf = 0; if (!M3.on) return; const now = performance.now(), moving = m3CameraStep(now);
+    if (M3.hasWater && M3.lastFrame && now - M3.lastFrame < 33){ M3.raf = requestAnimationFrame(draw); return; } M3.lastFrame = now;
+    if (M3.fly || M3.stroke || M3.drag) m3Lag(now - asked); try { m3Render(); } catch (e) { console.error(e); }
+    if (M3.on && (M3.hasWater || moving || M3.fly)) M3.raf = requestAnimationFrame(draw); }; M3.raf = requestAnimationFrame(draw); }
 /* the camera aims at the ground under the target, so a mountain town ends up in the middle of the view */
-function m3TY(){ if (!M3.hf) return 0.15; const gx = M3.tx * M3_U + W / 2 - 0.5, gy = M3.tz * M3_U + H / 2 - 0.5; let s = 0; for (const [a, b] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) s += Math.max(0, m3HAt(gx + a, gy + b)); return s / 5 + 0.02; }
 function m3Eye(){ const cp = Math.cos(M3.pitch), ty = m3TY(); return [M3.tx + M3.dist * Math.sin(M3.yaw) * cp, ty + M3.dist * Math.sin(M3.pitch), M3.tz + M3.dist * Math.cos(M3.yaw) * cp]; }
 function m3Render(){ const gl = M3.gl; if (!gl || !G) return; if (M3.rebuild || !M3.hc){ M3.rebuild = false; m3Build(); } if (M3.retex){ M3.retex = false; m3Texture(); } if (M3.rebuildB){ M3.rebuildB = false; m3Buildings(); }
   const cv = $("#m3gl"); gl.viewport(0, 0, cv.width, cv.height); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); gl.enable(gl.DEPTH_TEST);
-  const near = Math.max(0.006, Math.min(0.08, M3.dist * 0.01)); const mvp = M3.mvp = m3Mul(m3Persp(0.7, M3.w / M3.h, near, 200), m3Look(m3Eye(), [M3.tx, m3TY(), M3.tz])); M3.inv = m3Inv(mvp);
-  const sun = [-0.45, 0.8, -0.4], sl = Math.hypot(...sun);
-  gl.useProgram(M3.prog); gl.uniformMatrix4fv(M3.loc.M, false, mvp); gl.uniform3f(M3.loc.L, sun[0] / sl, sun[1] / sl, sun[2] / sl); gl.uniform1f(M3.loc.H, M3.hs); gl.uniform1f(M3.loc.Low, M3.lowQ ? 1 : 0);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, M3.tex); gl.uniform1i(M3.loc.X, 0);
-  const attrs = buf => { gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.enableVertexAttribArray(M3.loc.P); gl.vertexAttribPointer(M3.loc.P, 3, gl.FLOAT, false, 40, 0); gl.enableVertexAttribArray(M3.loc.T); gl.vertexAttribPointer(M3.loc.T, 2, gl.FLOAT, false, 40, 12); gl.enableVertexAttribArray(M3.loc.N); gl.vertexAttribPointer(M3.loc.N, 3, gl.FLOAT, false, 40, 20); if (M3.loc.R >= 0){ gl.enableVertexAttribArray(M3.loc.R); gl.vertexAttribPointer(M3.loc.R, 2, gl.FLOAT, false, 40, 32); } };
+  const mvp = M3.mvp = m3Mul(m3Projection(M3.dist), m3Look(m3Eye(), [M3.tx, m3TY(), M3.tz])); M3.inv = m3Inv(mvp);
+  const sun = [-0.45, 0.8, -0.4], sl = Math.hypot(...sun), eye = m3Eye(), now = performance.now();
+  gl.useProgram(M3.prog); gl.uniformMatrix4fv(M3.loc.M, false, mvp); gl.uniform3f(M3.loc.L, sun[0] / sl, sun[1] / sl, sun[2] / sl); gl.uniform3f(M3.loc.Eye, eye[0], eye[1], eye[2]); gl.uniform1f(M3.loc.Time, now * 0.001); gl.uniform1f(M3.loc.H, M3.hs); gl.uniform1f(M3.loc.Low, M3.lowQ ? 1 : 0);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, M3.tex); gl.uniform1i(M3.loc.X, 0); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, M3.procTex); gl.uniform1i(M3.loc.PT, 1); gl.activeTexture(gl.TEXTURE0);
+  const attrs = buf => { gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.enableVertexAttribArray(M3.loc.P); gl.vertexAttribPointer(M3.loc.P, 3, gl.FLOAT, false, 48, 0); gl.enableVertexAttribArray(M3.loc.T); gl.vertexAttribPointer(M3.loc.T, 2, gl.FLOAT, false, 48, 12); gl.enableVertexAttribArray(M3.loc.N); gl.vertexAttribPointer(M3.loc.N, 3, gl.FLOAT, false, 48, 20); if (M3.loc.R >= 0){ gl.enableVertexAttribArray(M3.loc.R); gl.vertexAttribPointer(M3.loc.R, 4, gl.FLOAT, false, 48, 32); } };
   attrs(M3.vb); gl.uniform4f(M3.loc.S, 0, 0, 0, 0); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, M3.ib); gl.drawElements(gl.TRIANGLES, M3.nIdx, M3.idxType || gl.UNSIGNED_SHORT, 0);
   attrs(M3.sb); gl.uniform4f(M3.loc.S, 0.31, 0.24, 0.18, 1); gl.drawArrays(gl.TRIANGLES, 0, M3.nSkirt);
   for (const k of ["P", "T", "N", "R"]) if (M3.loc[k] >= 0) gl.disableVertexAttribArray(M3.loc[k]);
-  if (M3.nB){ const b = M3.bloc; gl.useProgram(M3.bprog); gl.uniformMatrix4fv(b.M, false, mvp); gl.uniform3f(b.L, sun[0] / sl, sun[1] / sl, sun[2] / sl); gl.bindBuffer(gl.ARRAY_BUFFER, M3.bb);
+  if (M3.nB){ const b = M3.bloc; gl.useProgram(M3.bprog); gl.uniformMatrix4fv(b.M, false, mvp); gl.uniform3f(b.L, sun[0] / sl, sun[1] / sl, sun[2] / sl); gl.uniform3f(b.Eye, eye[0], eye[1], eye[2]); gl.uniform1f(b.Low, M3.lowQ ? 1 : 0); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, M3.procTex); gl.uniform1i(b.PT, 1); gl.bindBuffer(gl.ARRAY_BUFFER, M3.bb);
     gl.enableVertexAttribArray(b.P); gl.vertexAttribPointer(b.P, 3, gl.FLOAT, false, 36, 0); gl.enableVertexAttribArray(b.N); gl.vertexAttribPointer(b.N, 3, gl.FLOAT, false, 36, 12); gl.enableVertexAttribArray(b.C); gl.vertexAttribPointer(b.C, 3, gl.FLOAT, false, 36, 24);
     gl.drawArrays(gl.TRIANGLES, 0, M3.nB);
     if (M3.tb && M3.nT){ gl.bindBuffer(gl.ARRAY_BUFFER, M3.tb); gl.vertexAttribPointer(b.P, 3, gl.FLOAT, false, 36, 0); gl.vertexAttribPointer(b.N, 3, gl.FLOAT, false, 36, 12); gl.vertexAttribPointer(b.C, 3, gl.FLOAT, false, 36, 24); gl.drawArrays(gl.TRIANGLES, 0, M3.nT); }
     for (const k of ["P", "N", "C"]) gl.disableVertexAttribArray(b[k]); }
-  m3Labels(); const lab = $("#viewLabel"); if (lab) lab.textContent = `3D · ${Math.round(M3.yaw * 180 / Math.PI)}° · tilt ${Math.round(M3.pitch * 180 / Math.PI)}°`; }
+  if (!M3.hasWater || now - M3.labelT > 120){ m3Labels(); M3.labelT = now; } const lab = $("#viewLabel"); if (lab) lab.textContent = `3D · ${Math.round(M3.yaw * 180 / Math.PI)}° · tilt ${Math.round(M3.pitch * 180 / Math.PI)}°`; }
 function m3Project(x, y, z){ const m = M3.mvp; const cx2 = m[0] * x + m[4] * y + m[8] * z + m[12], cy2 = m[1] * x + m[5] * y + m[9] * z + m[13], cw = m[3] * x + m[7] * y + m[11] * z + m[15]; if (cw <= 0.05) return null;
   return [(cx2 / cw + 1) / 2 * M3.w, (1 - cy2 / cw) / 2 * M3.h, cw]; }
 /* ---------- what's under the pointer: a ray from the camera onto the ground ---------- */
-function m3Ray(ev){ if (!M3.inv || !M3.hf) return null; const r = $("#map3d").getBoundingClientRect(); const nx = (ev.clientX - r.left) / r.width * 2 - 1, ny = 1 - (ev.clientY - r.top) / r.height * 2, m = M3.inv;
+function m3Ray(ev){ if (!M3.hf) return null; m3Mats(); if (!M3.inv) return null; const r = $("#map3d").getBoundingClientRect(); const nx = (ev.clientX - r.left) / r.width * 2 - 1, ny = 1 - (ev.clientY - r.top) / r.height * 2, m = M3.inv;
   const un = (x, y, z) => { const w = m[3] * x + m[7] * y + m[11] * z + m[15]; return [(m[0] * x + m[4] * y + m[8] * z + m[12]) / w, (m[1] * x + m[5] * y + m[9] * z + m[13]) / w, (m[2] * x + m[6] * y + m[10] * z + m[14]) / w]; };
   const a = un(nx, ny, -1), b = un(nx, ny, 1), d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], len = Math.hypot(...d); const dir = d.map(v => v / len);
   const ground = p => m3HAt(p[0] * M3_U + W / 2 - 0.5, p[2] * M3_U + H / 2 - 0.5); const top = 3.6 * Math.max(1, M3.hs), lo = -0.1; let t0 = 0, t1 = Math.min(len, 400);
@@ -8476,16 +8521,16 @@ function m3Labels(){ const cv = $("#m3lab"), ctx = cv.getContext("2d"); ctx.setT
     for (let a = 0; a <= 48; a++){ const t = a / 48 * Math.PI * 2, gx = B.gx + Math.cos(t) * rad, gy = B.gy + Math.sin(t) * rad; const q = m3Project((gx + 0.5 - W / 2) / M3_U, m3HAt(gx, gy) + 0.01, (gy + 0.5 - H / 2) / M3_U); if (!q) { first = true; continue; } if (first){ ctx.moveTo(q[0], q[1]); first = false; } else ctx.lineTo(q[0], q[1]); }
     ctx.lineWidth = 3.5; ctx.strokeStyle = "rgba(20,14,30,.55)"; ctx.stroke(); ctx.lineWidth = 1.6; ctx.strokeStyle = "#fff4d6"; ctx.stroke(); }
   if (M3.path && M3.path.length > 1){ ctx.beginPath(); M3.path.forEach((c, k) => { const q = m3Project((cx(c) + 0.5 - W / 2) / M3_U, m3HAt(cx(c), cy(c)) + 0.01, (cy(c) + 0.5 - H / 2) / M3_U); if (q){ if (k) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); } }); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(120,190,230,.95)"; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]); } }
-function m3HitAt(ev){ const r = $("#map3d").getBoundingClientRect(); const x = ev.clientX - r.left, y = ev.clientY - r.top; for (let k = M3.hits.length - 1; k >= 0; k--){ const h = M3.hits[k]; if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h; } return null; }
+function m3HitAt(ev){ m3Mats(); const r = $("#map3d").getBoundingClientRect(); const x = ev.clientX - r.left, y = ev.clientY - r.top; for (let k = M3.hits.length - 1; k >= 0; k--){ const h = M3.hits[k]; if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h; } return null; }
 function m3Rename(h){ const k = CW / M3.w; openRename({ x: h.x * k, y: h.y * k, w: h.w * k, h: h.h * k, o: h.o }); }
 /* ---------- fly to a place: the camera glides to it and comes in close, keeping the way you've turned the map ---------- */
 const m3Still = () => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
 function m3FlyStop(){ M3.fly = null; }
-function m3FlyTo(gx, gy, want){ if (!M3.on || !G) return false; const mx = W / M3_U / 2, mz = H / M3_U / 2; const tx = Math.max(-mx, Math.min(mx, (gx + 0.5 - W / 2) / M3_U)), tz = Math.max(-mz, Math.min(mz, (gy + 0.5 - H / 2) / M3_U)), dist = want || Math.max(1.1, Math.min(2.2, M3.dist));
-  if (m3Still()){ M3.fly = null; M3.tx = tx; M3.tz = tz; M3.dist = dist; m3Clamp(); m3Frame(); return true; }
-  const f = M3.fly = { x0: M3.tx, z0: M3.tz, d0: M3.dist, tx, tz, dist, t0: performance.now(), ms: 950 };
+function m3FlyTo(gx, gy, want){ if (!M3.on || !G) return false; const mx = W / M3_U / 2, mz = H / M3_U / 2; const tx = Math.max(-mx, Math.min(mx, (gx + 0.5 - W / 2) / M3_U)), tz = Math.max(-mz, Math.min(mz, (gy + 0.5 - H / 2) / M3_U)), dist = want || Math.max(1.1, Math.min(2.2, M3.targetDist));
+  if (m3Still()){ M3.fly = null; M3.targetTx = tx; M3.targetTz = tz; M3.targetDist = dist; M3.tx = tx; M3.tz = tz; M3.dist = dist; m3Clamp(); m3Frame(); return true; }
+  const f = M3.fly = { x0: M3.targetTx, z0: M3.targetTz, d0: M3.targetDist, tx, tz, dist, t0: performance.now(), ms: 950 };
   const step = () => { if (M3.fly !== f) return; if (!M3.on){ M3.fly = null; return; } const t = Math.min(1, (performance.now() - f.t0) / f.ms), k = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    M3.tx = f.x0 + (f.tx - f.x0) * k; M3.tz = f.z0 + (f.tz - f.z0) * k; M3.dist = f.d0 + (f.dist - f.d0) * k; m3Clamp(); m3Frame(); if (t < 1) requestAnimationFrame(step); else M3.fly = null; };
+    M3.targetTx = f.x0 + (f.tx - f.x0) * k; M3.targetTz = f.z0 + (f.tz - f.z0) * k; M3.targetDist = f.d0 + (f.dist - f.d0) * k; m3Clamp(); m3Frame(); if (t < 1) requestAnimationFrame(step); else M3.fly = null; };
   requestAnimationFrame(step); return true; }
 /* called whenever the app selects a city or a spot (pick, on the flat map or here): in 2D it does nothing */
 function m3FlyToSel(){ if (!M3.on || !G || typeof selected === "undefined" || !selected) return false; if (M3.flyAt){ const a = M3.flyAt; M3.flyAt = null; return m3FlyTo(a[0], a[1]); } if (selected.kind === "city"){ const c = G.C.cities[selected.id]; return c ? m3FlyTo(c.x, c.y) : false; } return m3FlyTo(cx(selected.i), cy(selected.i)); }
@@ -8500,7 +8545,7 @@ function m3Capture(){ const gl = $("#m3gl"), lab = $("#m3lab"); if (!M3.on || !M
   const c = document.createElement("canvas"); c.width = gl.width; c.height = gl.height; const ctx = c.getContext("2d"); const g = ctx.createRadialGradient(c.width / 2, c.height * 0.35, 0, c.width / 2, c.height * 0.35, Math.max(c.width, c.height) * 0.75); g.addColorStop(0, "#3a4c58"); g.addColorStop(0.6, "#1b2830"); g.addColorStop(1, "#0c1514");
   ctx.fillStyle = g; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(gl, 0, 0); ctx.drawImage(lab, 0, 0, c.width, c.height);
   const url = c.toDataURL("image/png"); let blob = null; try { const b = atob(url.split(",")[1]), a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); blob = new Blob([a], { type: "image/png" }); } catch (e) {}
-  return M3.shot = { url, blob, w: c.width, h: c.height, name: m3ShotName(), tried: false }; }
+  if (M3.on && M3.hasWater) m3Frame(); return M3.shot = { url, blob, w: c.width, h: c.height, name: m3ShotName(), tried: false }; }
 /* a downloaded copy of the app saves the file straight away; inside Claude that is blocked, so the picture is also shown to save by hand */
 function m3ShotSave(s){ try { const a = document.createElement("a"), u = s.blob ? URL.createObjectURL(s.blob) : s.url; a.href = u; a.download = s.name; a.style.display = "none"; document.body.appendChild(a); a.click(); a.remove(); s.tried = true; if (s.blob) setTimeout(() => URL.revokeObjectURL(u), 4000); } catch (e) { s.tried = false; } return s.tried; }
 function m3ShotClose(){ const d = $("#m3ShotBox"); if (!d || d.hidden) return; d.hidden = true; const im = $("#m3ShotImg"); if (im) im.removeAttribute("src"); const b = $("#m3Shot"); if (b && !b.hidden) b.focus(); }
@@ -8515,16 +8560,19 @@ function m3ShotShow(s){ const d = $("#m3ShotBox"); if (!d) return s; $("#m3ShotI
 async function m3ShotCopy(){ const s = M3.shot, msg = $("#m3ShotMsg"); if (!s) return; const say = t => { if (msg) msg.textContent = t; };
   try { if (!s.blob || !navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem === "undefined") throw new Error("no clipboard"); await navigator.clipboard.write([new ClipboardItem({ "image/png": s.blob })]); say("Copied. Paste it wherever you like."); }
   catch (e) { say("Copying isn't allowed here. Right-click or long-press the image and choose Save or Copy instead."); } }
-function m3Clamp(){ M3.pitch = Math.max(0.22, Math.min(1.53, M3.pitch)); M3.dist = Math.max(0.07, Math.min(30, M3.dist)); const mx = W / M3_U / 2, mz = H / M3_U / 2; M3.tx = Math.max(-mx, Math.min(mx, M3.tx)); M3.tz = Math.max(-mz, Math.min(mz, M3.tz)); }
-function m3Reset(){ Object.assign(M3, { yaw: 0, pitch: 0.95, dist: Math.max(W / M3_U, H / M3_U * 1.6) * 0.95 * Math.max(1, 1.45 / Math.max(0.6, M3.w / M3.h)), tx: 0, tz: H / M3_U * 0.04 }); const rr = $("#rotRange"); if (rr) rr.value = 0; m3Frame(); }
-function m3Pan(dx, dy){ const s = M3.dist / M3.h * 0.95, c = Math.cos(M3.yaw), sn = Math.sin(M3.yaw); M3.tx -= (dx * c + dy * sn) * s; M3.tz -= (-dx * sn + dy * c) * s; }
+function m3Clamp(){ const mx = W / M3_U / 2, mz = H / M3_U / 2, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  M3.targetPitch = clamp(M3.targetPitch, 0.2, 1.5); M3.targetDist = clamp(M3.targetDist, 0.22, 30); M3.targetYaw = Math.atan2(Math.sin(M3.targetYaw), Math.cos(M3.targetYaw)); M3.targetTx = clamp(M3.targetTx, -mx, mx); M3.targetTz = clamp(M3.targetTz, -mz, mz);
+  M3.pitch = clamp(M3.pitch, 0.2, 1.5); M3.dist = clamp(M3.dist, 0.22, 30); M3.tx = clamp(M3.tx, -mx, mx); M3.tz = clamp(M3.tz, -mz, mz); }
+function m3Reset(){ const dist = Math.max(W / M3_U, H / M3_U * 1.6) * 0.95 * Math.max(1, 1.45 / Math.max(0.6, M3.w / M3.h)), tz = H / M3_U * 0.04; Object.assign(M3, { yaw: 0, pitch: 0.95, dist, tx: 0, tz, targetYaw: 0, targetPitch: 0.95, targetDist: dist, targetTx: 0, targetTz: tz, lift: 0, targetLift: 0, camTime: 0 });
+  const rr = $("#rotRange"); if (rr) rr.value = 0; m3Clamp(); m3Frame(); }
+function m3Pan(dx, dy){ const s = M3.targetDist / Math.max(1, M3.h) * 0.95, c = Math.cos(M3.targetYaw), sn = Math.sin(M3.targetYaw); M3.targetTx -= (dx * c + dy * sn) * s; M3.targetTz -= (-dx * sn + dy * c) * s; }
 function m3Only(on){ for (const id of ["#m3Shot", "#m3HWrap"]){ const el = $(id); if (el) el.hidden = !on; } const vc = document.querySelector(".viewctl"); if (vc) vc.classList.toggle("is3d", on); /* on a phone the angle readout makes room for them */ if (on) m3HsShow(); }
 function m3Painting(){ return !(typeof KEYS !== "undefined" && KEYS.shift) && !["look", "rename"].includes(ME.tool); }
 function m3Hint(){ const p = $("#map3d .m3hint"); if (!p) return; p.textContent = m3Painting() ? (ME.tool === "biome" ? "Drag to paint · right-click to thicken trees · Shift-drag to move · Ctrl-drag to turn · scroll to zoom" : "Drag to paint · right-drag or two fingers to move · Ctrl-drag to turn · scroll or pinch to zoom") : "Drag to move the map · right-drag or Ctrl-drag to turn and tilt · scroll to zoom toward the pointer · click a place to fly there · hold Shift with any tool to move"; }
 function m3Set(on){ const btn = $("#z3d"), box = $("#map3d"), map = $("#map"); if (!btn || !box) return;
   if (on){ let ok = false; try { ok = m3Init(); } catch (e) { console.error(e); } if (!ok){ flash("The 3D view needs WebGL, which this browser has switched off. The flat map still works."); return; }
     M3.on = true; box.hidden = false; map.style.visibility = "hidden"; btn.textContent = "2D"; btn.setAttribute("aria-pressed", "true"); btn.title = "Back to the flat map"; m3Only(true); m3Hint(); m3Size(); if (!M3.hc) m3Reset(); drawMap(); }
-  else { M3.on = false; M3.fly = null; M3.brush = null; m3ToolEnd(); m3Only(false); m3ShotClose(); box.hidden = true; map.style.visibility = ""; btn.textContent = "3D"; btn.setAttribute("aria-pressed", "false"); btn.title = "See the map in 3D"; const rr = $("#rotRange"); if (rr) rr.value = Math.round(view.rot * 180 / Math.PI); drawMap(); } }
+  else { M3.on = false; if (M3.raf) cancelAnimationFrame(M3.raf); M3.raf = 0; M3.fly = null; M3.brush = null; m3ToolEnd(); m3Only(false); m3ShotClose(); box.hidden = true; map.style.visibility = ""; btn.textContent = "3D"; btn.setAttribute("aria-pressed", "false"); btn.title = "See the map in 3D"; const rr = $("#rotRange"); if (rr) rr.value = Math.round(view.rot * 180 / Math.PI); drawMap(); } }
 /* ---------- the map tools, used on the 3D ground: the same brushes, stamps, water and places as the flat map ---------- */
 function m3ToolDown(e){ const t = ME.tool, i = m3Cell(e); if (i < 0) return false;
   if (typeof tool2Click === "function" && tool2Click(t, i, e)) return true;
@@ -8547,31 +8595,39 @@ function m3Hover(e){ if (M3.hoverRaf) { M3.hoverEv = e; return; } M3.hoverEv = e
 function m3Wire(){ const box = $("#map3d"), btn = $("#z3d"); if (!box || !btn || box.dataset.wired) return; box.dataset.wired = "1"; btn.onclick = () => m3Set(!M3.on);
   // the view buttons steer the 3D camera while it's showing
   const steer = (id, fn, ev = "click") => { const el = $(id); if (el) el.addEventListener(ev, e => { if (!M3.on) return; e.stopImmediatePropagation(); e.preventDefault(); m3FlyStop(); fn(e); m3Clamp(); m3Frame(); }, true); };
-  steer("#zIn", () => { M3.dist /= 1.3; }); steer("#zOut", () => { M3.dist *= 1.3; }); steer("#rotL", () => { M3.yaw -= Math.PI / 12; }); steer("#rotR", () => { M3.yaw += Math.PI / 12; }); steer("#zReset", () => m3Reset());
-  steer("#rotRange", e => { M3.yaw = +e.target.value * Math.PI / 180; }, "input");
+  steer("#zIn", () => { M3.targetDist /= 1.3; }); steer("#zOut", () => { M3.targetDist *= 1.3; }); steer("#rotL", () => { M3.targetYaw -= Math.PI / 12; }); steer("#rotR", () => { M3.targetYaw += Math.PI / 12; }); steer("#zReset", () => m3Reset());
+  steer("#rotRange", e => { M3.targetYaw = +e.target.value * Math.PI / 180; }, "input");
   const ts = $("#mapTool"); if (ts) ts.addEventListener("change", () => { M3.brush = null; m3Hint(); m3Frame(); });
   const ptr = new Map(); let pinch = null, moved = 0;
-  box.addEventListener("pointerdown", e => { m3FlyStop(); M3.drag = true; box.focus({ preventScroll: true }); try { box.setPointerCapture(e.pointerId); } catch (err) {} moved = 0;
+  box.addEventListener("pointerdown", e => { m3FlyStop(); M3.drag = true; m3Mats(); box.focus({ preventScroll: true }); try { box.setPointerCapture(e.pointerId); } catch (err) {} moved = 0;
     const paintMode = m3Painting(), mods = e.ctrlKey || e.metaKey || e.altKey;
     const thick = paintMode && ME.tool === "biome" && e.button === 2 && !e.shiftKey;
     const look = !paintMode, grab = look && e.button === 0 && !mods;
-    ptr.set(e.pointerId, { x: e.clientX, y: e.clientY, pan: !thick && !look && e.button === 2, grab: grab ? m3GrabStart(e) : null, turn: look ? (e.button === 2 || e.button === 1 || mods) : (mods || e.button === 1) });
+    ptr.set(e.pointerId, { x: e.clientX, y: e.clientY, pan: !thick && !look && e.button === 2, grab: grab ? m3GrabStart(e) : null, grabEligible: grab, turn: look ? (e.button === 2 || e.button === 1 || mods) : (mods || e.button === 1) });
     if (ptr.size === 2){ m3ToolEnd(); const [a, b] = [...ptr.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; return; }
     if (thick || (paintMode && e.button === 0 && !mods && !e.shiftKey)){ e.preventDefault(); ME.thicken = thick; if (m3ToolDown(e)) ptr.get(e.pointerId).tool = true; } });
   box.addEventListener("pointermove", e => { const p = ptr.get(e.pointerId); if (!p){ m3Hover(e); return; } const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY; moved += Math.abs(dx) + Math.abs(dy); if (moved > 30) box.classList.add("m3used");
-    if (ptr.size >= 2 && pinch){ const [a, b] = [...ptr.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; if (d > 10) M3.dist *= pinch.d / d; m3Pan(mx - pinch.mx, my - pinch.my); pinch = { d, mx, my }; m3Clamp(); m3Frame(); return; }
+    if (ptr.size >= 2 && pinch){ const [a, b] = [...ptr.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; if (d > 10) M3.targetDist *= pinch.d / d; m3Pan(mx - pinch.mx, my - pinch.my); pinch = { d, mx, my }; m3Clamp(); m3Frame(); return; }
     if (p.tool){ m3Hover(e); m3ToolMove(e); return; }
-    if (p.grab) m3GrabMove(p.grab, e); else if (p.pan) m3Pan(dx, dy); else if (!m3Painting() || p.turn){ M3.yaw -= dx * 0.008; M3.pitch += dy * 0.006; } else return;
+    if (p.grab) m3GrabMove(p.grab, e); else if (p.pan) m3Pan(dx, dy); else if (!m3Painting() || p.turn){ M3.targetYaw -= dx * 0.008; M3.targetPitch += dy * 0.006; } else return;
     m3Clamp(); m3Frame(); });
-  const up = e => { const p = ptr.get(e.pointerId); ptr.delete(e.pointerId); if (ptr.size < 2) pinch = null; if (!ptr.size) M3.drag = false; if (p && p.tool){ m3ToolEnd(); return; }
+  const up = e => { const p = ptr.get(e.pointerId); if (!p) return; ptr.delete(e.pointerId);
+    if (ptr.size < 2){ pinch = null; if (ptr.size === 1){ const remaining = ptr.values().next().value; if (remaining.grabEligible){ m3Mats(); remaining.grab = m3GrabStart({ clientX: remaining.x, clientY: remaining.y }); } } }
+    if (!ptr.size) M3.drag = false; if (p.tool){ m3ToolEnd(); return; }
     if (moved < 4 && e.type === "pointerup" && ME.tool === "rename"){ const h = m3HitAt(e); if (h) m3Rename(h); else flash("Click directly on a name to rename it."); }
     // one click on a city, a name or the ground selects it, as on the flat map, and the camera flies there
     else if (moved < 4 && e.type === "pointerup" && e.button === 0 && ME.tool === "look" && !ptr.size && G){ const i = m3PlaceAt(e); if (i >= 0) pick(i); } };
-  box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up); box.addEventListener("contextmenu", e => e.preventDefault());
+  const clearActive = () => { const hadTool = [...ptr.values()].some(p => p.tool); ptr.clear(); pinch = null; M3.drag = false;
+    if (hadTool) m3ToolEnd(); if (typeof DRAG2 !== "undefined" && DRAG2.t) dragEnd();
+    if (typeof KEYS !== "undefined" && KEYS.shift){ KEYS.shift = false; document.body.classList.remove("shift-look"); M3.brush = null; m3Hint(); if (M3.on) m3Frame(); else if (G) blitMap(); } };
+  box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up);
+  box.addEventListener("lostpointercapture", e => { if (ptr.has(e.pointerId)) clearActive(); });
+  window.addEventListener("blur", clearActive); document.addEventListener("visibilitychange", () => { if (document.hidden) clearActive(); });
+  box.addEventListener("contextmenu", e => e.preventDefault());
   box.addEventListener("pointerleave", () => { if (!M3.stroke && M3.brush){ M3.brush = null; m3Frame(); } });
   box.addEventListener("dblclick", e => { if (m3Painting()) return; const h = m3HitAt(e); if (h){ e.preventDefault(); m3FlyStop(); m3Rename(h); } });
-  box.addEventListener("wheel", e => { e.preventDefault(); m3FlyStop(); const h = m3Ray(e); M3.dist *= Math.exp(e.deltaY * 0.0012); m3Clamp(); if (h && typeof m3Pin === "function") m3Pin(e, h); m3Frame(); }, { passive: false });
-  box.addEventListener("keydown", e => { const k = e.key; const map = { ArrowLeft: () => M3.yaw -= 0.12, ArrowRight: () => M3.yaw += 0.12, ArrowUp: () => M3.pitch += 0.08, ArrowDown: () => M3.pitch -= 0.08, "+": () => M3.dist /= 1.2, "=": () => M3.dist /= 1.2, "-": () => M3.dist *= 1.2 }; if (map[k]){ e.preventDefault(); m3FlyStop(); map[k](); m3Clamp(); m3Frame(); } });
+  box.addEventListener("wheel", e => { e.preventDefault(); m3FlyStop(); const h = m3Ray(e); M3.targetDist *= Math.exp(e.deltaY * 0.0012); m3Clamp(); if (h && typeof m3Pin === "function") m3Pin(e, h); m3Frame(); }, { passive: false });
+  box.addEventListener("keydown", e => { const k = e.key; const map = { ArrowLeft: () => M3.targetYaw -= 0.12, ArrowRight: () => M3.targetYaw += 0.12, ArrowUp: () => M3.targetPitch += 0.08, ArrowDown: () => M3.targetPitch -= 0.08, "+": () => M3.targetDist /= 1.2, "=": () => M3.targetDist /= 1.2, "-": () => M3.targetDist *= 1.2 }; if (map[k]){ e.preventDefault(); m3FlyStop(); map[k](); m3Clamp(); m3Frame(); } });
   // snapshot and terrain height
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on("#m3Shot", "click", () => { if (M3.on) m3Snapshot(); }); on("#m3H", "input", e => m3SetHs(e.target.value)); on("#m3ShotCopy", "click", m3ShotCopy); on("#m3ShotClose", "click", m3ShotClose);
@@ -8592,6 +8648,8 @@ function m3W(M, x, y, z){ return [M.ox + (x * M.c + z * M.s) * M.k, M.oy + y * M
 function m3Tri(M, a, b, c, col, ctr){ const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2]; let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
   if (ctr ? nx * (a[0] - ctr[0]) + ny * (a[1] - ctr[1]) + nz * (a[2] - ctr[2]) < 0 : ny < 0){ nx = -nx; ny = -ny; nz = -nz; } m3V(M, a, nx, ny, nz, col); m3V(M, b, nx, ny, nz, col); m3V(M, c, nx, ny, nz, col); }
 function m3Quad(M, a, b, c, d, col, ctr){ m3Tri(M, a, b, c, col, ctr); m3Tri(M, a, c, d, col, ctr); }
+function m3ShadowDisk(M, x, z, rx, rz, y, col, rnd){ const ring = [], n = 8, turn = rnd ? rnd() * Math.PI * 2 : 0.25; for (let i = 0; i < n; i++){ const a = turn + i / n * Math.PI * 2; ring.push(m3W(M, x + Math.cos(a) * rx, y, z + Math.sin(a) * rz)); }
+  const c = m3W(M, x, y, z); for (let i = 0; i < n; i++) m3Tri(M, c, ring[i], ring[(i + 1) % n], col); }
 /* shapes, in the local space set on M (x and z across the ground, y up) */
 function m3Box(M, x, z, w, d, y0, h, col, top){ const x0 = x - w / 2, x1 = x + w / 2, z0 = z - d / 2, z1 = z + d / 2, y1 = y0 + h, c = m3W(M, x, y0 + h / 2, z);
   const A = m3W(M, x0, y0, z0), B = m3W(M, x1, y0, z0), C = m3W(M, x1, y0, z1), D = m3W(M, x0, y0, z1), E = m3W(M, x0, y1, z0), F = m3W(M, x1, y1, z0), Gp = m3W(M, x1, y1, z1), Hp = m3W(M, x0, y1, z1);
@@ -8600,15 +8658,34 @@ function m3Roof(M, x, z, w, d, y1, rh, roof, wall){ const c = m3W(M, x, y1 - 0.0
   const a = m3W(M, x - hw, y1, z - hd), b = m3W(M, x + hw, y1, z - hd), cc = m3W(M, x + hw, y1, z + hd), dd = m3W(M, x - hw, y1, z + hd);
   if (w >= d){ const r0 = m3W(M, x - hw, y1 + rh, z), r1 = m3W(M, x + hw, y1 + rh, z); m3Quad(M, a, b, r1, r0, roof, c); m3Quad(M, dd, cc, r1, r0, roof, c); m3Tri(M, a, dd, r0, wall, c); m3Tri(M, b, cc, r1, wall, c); }
   else { const r0 = m3W(M, x, y1 + rh, z - hd), r1 = m3W(M, x, y1 + rh, z + hd); m3Quad(M, a, dd, r1, r0, roof, c); m3Quad(M, b, cc, r1, r0, roof, c); m3Tri(M, a, b, r0, wall, c); m3Tri(M, dd, cc, r1, wall, c); } }
-function m3Gable(M, x, z, w, d, y0, h, rh, wall, roof){ m3Box(M, x, z, w, d, y0, h, wall, false); m3Roof(M, x, z, w, d, y0 + h, rh, roof, wall); }
+function m3Gable(M, x, z, w, d, y0, h, rh, wall, roof){ m3ShadowDisk(M, x, z, w * 0.68, d * 0.68, y0 + 0.0025, [0.20, 0.20, 0.17]); m3Box(M, x, z, w + 0.16, d + 0.16, y0 - 0.13, 0.16, [0.49, 0.47, 0.43]); m3Box(M, x, z, w, d, y0, h, wall, false); m3Roof(M, x, z, w, d, y0 + h, rh, roof, wall); }
+function m3DoorArch(M, x, z, w, h, wood, trim){ const r = w / 2, spring = h - r * 0.82, front = z + 0.006, left = m3W(M, x - r, 0, front), right = m3W(M, x + r, 0, front), topL = m3W(M, x - r, spring, front), topR = m3W(M, x + r, spring, front);
+  m3Quad(M, left, right, topR, topL, wood); const c = m3W(M, x, spring, front), inner = [], outer = [];
+  for (let i = 0; i <= 6; i++){ const a = Math.PI - i / 6 * Math.PI; inner.push(m3W(M, x + Math.cos(a) * r, spring + Math.sin(a) * r, front)); outer.push(m3W(M, x + Math.cos(a) * (r + 0.035), spring + Math.sin(a) * (r + 0.035), front)); }
+  for (let i = 0; i < 6; i++){ m3Tri(M, c, inner[i], inner[i + 1], wood); m3Quad(M, inner[i], outer[i], outer[i + 1], inner[i + 1], trim); }
+  m3Quad(M, m3W(M, x - r - 0.035, 0, front), left, topL, outer[0], trim); m3Quad(M, right, m3W(M, x + r + 0.035, 0, front), outer[6], topR, trim); }
 function m3Pyr(M, x, z, w, d, y0, h, col){ const c = m3W(M, x, y0 - 0.01, z), t = m3W(M, x, y0 + h, z), hw = w / 2, hd = d / 2; const p = [m3W(M, x - hw, y0, z - hd), m3W(M, x + hw, y0, z - hd), m3W(M, x + hw, y0, z + hd), m3W(M, x - hw, y0, z + hd)]; for (let i = 0; i < 4; i++) m3Tri(M, p[i], p[(i + 1) % 4], t, col, c); }
 function m3Ring(M, x, z, r, y, n, a0){ const o = []; for (let i = 0; i < n; i++){ const a = (a0 || 0) + i / n * Math.PI * 2; o.push(m3W(M, x + Math.cos(a) * r, y, z + Math.sin(a) * r)); } return o; }
 function m3Cyl(M, x, z, r, y0, h, n, col, top){ const a = m3Ring(M, x, z, r, y0, n), b = m3Ring(M, x, z, r, y0 + h, n), c = m3W(M, x, y0 + h / 2, z); for (let i = 0; i < n; i++){ const j = (i + 1) % n; m3Quad(M, a[i], a[j], b[j], b[i], col, c); }
   if (top){ const t = m3W(M, x, y0 + h, z); for (let i = 0; i < n; i++) m3Tri(M, b[i], b[(i + 1) % n], t, top, c); } }
+function m3Boat(M, x, z, scale){ const p = (a, y, b) => m3W(M, x + a * scale, y * scale, z + b * scale), bow = p(1.0, 0.10, 0), stern = p(-0.9, 0.10, 0), port = p(-0.52, 0.12, -0.32), star = p(-0.52, 0.12, 0.32), keel = p(-0.7, -0.06, 0);
+  m3Quad(M, bow, port, keel, stern, [0.30, 0.17, 0.10]); m3Quad(M, stern, keel, star, bow, [0.43, 0.25, 0.14]); m3Quad(M, port, bow, star, p(-0.52, 0.14, 0.32), [0.56, 0.36, 0.20]);
+  m3Box(M, x - 0.18 * scale, z, 0.65 * scale, 0.32 * scale, 0.12 * scale, 0.055 * scale, [0.42, 0.28, 0.16]); m3Box(M, x - 0.2 * scale, z, 0.035 * scale, 0.035 * scale, 0.14 * scale, 0.76 * scale, [0.28, 0.19, 0.12]);
+  m3Tri(M, p(-0.18, 0.82, 0), p(-0.18, 0.18, 0), p(0.52, 0.2, 0), [0.90, 0.84, 0.68]); }
 function m3Cone(M, x, z, r, y0, h, n, col){ const a = m3Ring(M, x, z, r, y0, n), t = m3W(M, x, y0 + h, z), c = m3W(M, x, y0 - 0.01, z); for (let i = 0; i < n; i++) m3Tri(M, a[i], a[(i + 1) % n], t, col, c); }
 function m3Dome(M, x, z, r, y0, n, col){ const c = m3W(M, x, y0 - 0.01, z); let prev = m3Ring(M, x, z, r, y0, n); for (const [k, yy] of [[0.86, 0.5], [0.5, 0.86]]){ const cur = m3Ring(M, x, z, r * k, y0 + r * yy, n); for (let i = 0; i < n; i++){ const j = (i + 1) % n; m3Quad(M, prev[i], prev[j], cur[j], cur[i], col, c); } prev = cur; }
   const t = m3W(M, x, y0 + r * 1.05, z); for (let i = 0; i < n; i++) m3Tri(M, prev[i], prev[(i + 1) % n], t, col, c); }
 function m3Octa(M, x, y, z, rx, ry, col, rot){ const c = m3W(M, x, y, z), t = m3W(M, x, y + ry, z), b = m3W(M, x, y - ry, z), r = m3Ring(M, x, z, rx, y, 4, rot || 0.6); for (let i = 0; i < 4; i++){ const j = (i + 1) % 4; m3Tri(M, r[i], r[j], t, col, c); m3Tri(M, r[i], r[j], b, col, c); } }
+function m3LeafCluster(M, x, y, z, rx, ry, col, rot){ const center = m3W(M, x, y, z), top = m3W(M, x, y + ry, z), bottom = m3W(M, x, y - ry, z), ring = m3Ring(M, x, z, rx, y, 4, rot || 0.6);
+  for (let i = 0; i < 4; i++){ const j = (i + 1) % 4, shade = 0.92 + (i % 2) * 0.12, hi = col.map((v, k) => Math.min(1, v * shade * (k === 1 ? 1.18 : k === 0 ? 1.10 : 0.94))), lo = col.map(v => v * 0.68);
+    m3Tri(M, ring[i], ring[j], top, hi, center); m3Tri(M, ring[i], ring[j], bottom, lo, center); } }
+function m3TreeRoots(M, j, rnd){ for (let i = 0; i < 4; i++){ const a = i * Math.PI / 2 + rnd() * 0.28, bark = i % 2 ? [0.27, 0.18, 0.12] : [0.36, 0.24, 0.15];
+    m3Tri(M, m3W(M, 0, 0.10 * j, 0), m3W(M, Math.cos(a) * 0.38 * j, 0.01 * j, Math.sin(a) * 0.38 * j), m3W(M, Math.cos(a) * 0.11 * j, 0.43 * j, Math.sin(a) * 0.11 * j), bark); } }
+function m3TreeBoughs(M, j, count, crownY, rnd){ for (let i = 0; i < count; i++){ const a = i / count * Math.PI * 2 + rnd() * 0.22, dx = Math.cos(a), dz = Math.sin(a), px = -dz * 0.035 * j, pz = dx * 0.035 * j, x = dx * 0.58 * j, z = dz * 0.58 * j, y0 = crownY * 0.48 * j, y1 = crownY * 0.86 * j;
+    const a0 = m3W(M, px, y0, pz), b0 = m3W(M, -px, y0, -pz), a1 = m3W(M, x + px * 0.35, y1, z + pz * 0.35), b1 = m3W(M, x - px * 0.35, y1, z - pz * 0.35);
+    m3Quad(M, a0, b0, b1, a1, [0.32, 0.21, 0.13]); } }
+function m3Plaza(M, S, radius){ m3Put(M, S, 0, 0, 0); const y = 0.003, center = m3W(M, 0, y, 0), ring = m3Ring(M, 0, 0, radius, y, 12, 0.13), tones = [[0.56, 0.53, 0.47], [0.62, 0.58, 0.51], [0.51, 0.49, 0.44]];
+  for (let i = 0; i < ring.length; i++) m3Tri(M, center, ring[i], ring[(i + 1) % ring.length], tones[i % tones.length]); }
 function m3Flag(M, x, z, y0, h, col){ m3Box(M, x, z, 0.07, 0.07, y0, h, [0.3, 0.25, 0.2]); const a = m3W(M, x, y0 + h, z), b = m3W(M, x, y0 + h - 0.42, z), c = m3W(M, x + 0.75, y0 + h - 0.21, z); m3Tri(M, a, b, c, col); m3Tri(M, a, c, b, col.map(v => v * 0.8), m3W(M, x, y0 + h, z + 1)); }
 function m3Gy(wx, wz){ return m3HAt(wx * M3_U + W / 2 - 0.5, wz * M3_U + H / 2 - 0.5); }
 /* point the mesh at a spot inside a settlement: local offset (lx, lz), turned by ang, standing on the ground there */
@@ -8618,9 +8695,12 @@ function m3Spot(S, rnd, r0, r1, size){ for (let k = 0; k < 24; k++){ const a = r
 const M3C = { plaster: [[0.90, 0.86, 0.78], [0.84, 0.78, 0.68], [0.93, 0.90, 0.84], [0.80, 0.72, 0.62]], timber: [0.45, 0.33, 0.24], stone: [0.66, 0.64, 0.60], stoneD: [0.52, 0.50, 0.48], thatch: [0.74, 0.62, 0.36], thatchD: [0.60, 0.50, 0.30], slate: [0.36, 0.40, 0.46], tile: [0.70, 0.34, 0.24], gold: [0.95, 0.74, 0.26], cream: [0.95, 0.91, 0.82], mud: [0.72, 0.58, 0.44], water: [0.30, 0.52, 0.62] };
 function m3Tint(c, f){ return [c[0] * f, c[1] * f, c[2] * f]; }
 /* ---- dwellings ---- */
-function m3Hut(M, rnd){ const r = 0.5 + rnd() * 0.18; m3Cyl(M, 0, 0, r, 0, 0.5, 7, M3C.mud); m3Cone(M, 0, 0, r * 1.35, 0.46, 0.75 + rnd() * 0.25, 7, rnd() < 0.5 ? M3C.thatch : M3C.thatchD); }
+function m3Hut(M, rnd){ const r = 0.5 + rnd() * 0.18; m3ShadowDisk(M, 0, 0, r * 1.4, r * 1.3, 0.0025, [0.20, 0.19, 0.16], rnd); m3Cyl(M, 0, 0, r * 1.12, -0.12, 0.14, 7, M3C.stoneD); m3Cyl(M, 0, 0, r, 0, 0.5, 7, M3C.mud); m3Cone(M, 0, 0, r * 1.35, 0.46, 0.75 + rnd() * 0.25, 7, rnd() < 0.5 ? M3C.thatch : M3C.thatchD); }
 function m3Cottage(M, rnd, roof){ const w = 1.3 + rnd() * 0.5, d = 0.95 + rnd() * 0.25; m3Gable(M, 0, 0, w, d, 0, 0.55, 0.6, rnd() < 0.4 ? M3C.timber : M3C.plaster[(rnd() * 4) | 0], roof); if (rnd() < 0.5) m3Box(M, w * 0.3, 0, 0.2, 0.2, 0.55, 0.85, M3C.stoneD); }
 function m3House(M, rnd, roof, tall){ const w = 1.3 + rnd() * 0.8, d = 1.05 + rnd() * 0.35, h = (tall ? 1.3 : 0.8) + rnd() * 0.6, wall = M3C.plaster[(rnd() * 4) | 0]; m3Gable(M, 0, 0, w, d, 0, h, 0.6 + rnd() * 0.2, wall, m3Tint(roof, 0.85 + rnd() * 0.3));
+  for (const x of [-1, 1]) m3Box(M, x * (w / 2 - 0.06), 0, 0.085, d + 0.02, 0, h, M3C.timber);
+  m3Box(M, 0, d / 2 + 0.012, w * 0.92, 0.05, h * 0.72, 0.085, M3C.timber); m3DoorArch(M, 0, d / 2, 0.28, 0.62, [0.23, 0.14, 0.09], M3C.timber);
+  for (const x of [-w * 0.27, w * 0.27]){ m3Box(M, x, d / 2 + 0.012, 0.13, 0.035, h * 0.53, 0.22, M3C.stoneD); m3Box(M, x, d / 2 + 0.03, 0.17, 0.045, h * 0.53 - 0.035, 0.045, M3C.timber); }
   if (tall && rnd() < 0.6) m3Box(M, 0, 0, w * 1.04, d * 1.04, h * 0.5, 0.08, M3C.timber, false); if (rnd() < 0.55) m3Box(M, -w * 0.28, d * 0.1, 0.22, 0.22, h, 0.95, M3C.stoneD);
   if (rnd() < 0.3){ const ww = w * 0.55; m3Gable(M, w * 0.2, d * 0.75, ww, d * 0.7, 0, h * 0.7, 0.45, wall, roof); } }
 function m3Field(M, S, lx, lz, w, d, ang, rnd){ const cols = [[0.76, 0.68, 0.36], [0.52, 0.62, 0.30], [0.62, 0.50, 0.32], [0.66, 0.72, 0.38]]; const strips = 3 + ((rnd() * 3) | 0); const c = Math.cos(S.rot + ang), s = Math.sin(S.rot + ang), c0 = Math.cos(S.rot), s0 = Math.sin(S.rot);
@@ -8693,11 +8773,11 @@ function m3Castle(M, S, rnd, banner){ const R = 2.7, pts = [[-R, -R], [R, -R], [
 function m3TreeShape(M, type, rnd){ const j = 0.82 + rnd() * 0.36, sh = 0.85 + rnd() * 0.3; const g = (r, gg, b) => [r * sh, gg * sh, b * sh];
   if (type === "conifer"){ const c = g(0.13, 0.30, 0.20); m3Cone(M, 0, 0, 0.62 * j, 0.22, 1.25 * j, 5, c); m3Cone(M, 0, 0, 0.42 * j, 0.95 * j, 1.2 * j, 5, g(0.16, 0.35, 0.23)); }
   else if (type === "pine"){ m3Cone(M, 0, 0, 0.1, 0, 1.5 * j, 3, [0.36, 0.25, 0.18]); m3Cone(M, 0, 0, 0.6 * j, 1.0 * j, 1.5 * j, 5, g(0.10, 0.27, 0.19)); m3Cone(M, 0, 0, 0.38 * j, 1.9 * j, 1.1 * j, 5, g(0.13, 0.31, 0.21)); }
-  else if (type === "broadleaf"){ m3Cone(M, 0, 0, 0.13, 0, 1.0 * j, 3, [0.36, 0.26, 0.17]); m3Octa(M, 0, 1.25 * j, 0, 0.72 * j, 0.66 * j, g(0.25, 0.45, 0.17), rnd() * 3); m3Octa(M, 0.3 * j, 0.98 * j, 0.18 * j, 0.44 * j, 0.4 * j, g(0.31, 0.52, 0.20), rnd() * 3); }
+  else if (type === "broadleaf"){ m3Cone(M, 0, 0, 0.13, 0, 1.0 * j, 3, [0.36, 0.26, 0.17]); m3LeafCluster(M, 0, 1.25 * j, 0, 0.72 * j, 0.66 * j, g(0.25, 0.45, 0.17), rnd() * 3); m3LeafCluster(M, 0.3 * j, 0.98 * j, 0.18 * j, 0.44 * j, 0.4 * j, g(0.31, 0.52, 0.20), rnd() * 3); }
   else if (type === "autumn"){ m3Cone(M, 0, 0, 0.13, 0, 1.0 * j, 3, [0.34, 0.24, 0.16]); m3Octa(M, 0, 1.2 * j, 0, 0.68 * j, 0.62 * j, rnd() < 0.5 ? g(0.62, 0.42, 0.14) : g(0.52, 0.50, 0.16), rnd() * 3); }
   else if (type === "jungle"){ m3Cone(M, 0, 0, 0.14, 0, 1.7 * j, 3, [0.30, 0.22, 0.15]); m3Octa(M, 0, 1.9 * j, 0, 0.95 * j, 0.5 * j, g(0.10, 0.36, 0.14), rnd() * 3); m3Octa(M, -0.25 * j, 1.35 * j, 0.2 * j, 0.6 * j, 0.42 * j, g(0.15, 0.43, 0.16), rnd() * 3); }
   else if (type === "palm"){ m3Cone(M, 0, 0, 0.09, 0, 1.7 * j, 3, [0.50, 0.40, 0.26]); const top = m3W(M, 0, 1.75 * j, 0), col = g(0.24, 0.50, 0.18); for (let i = 0; i < 5; i++){ const a = i / 5 * 6.283 + rnd(), a2 = a + 0.5; m3Tri(M, top, m3W(M, Math.cos(a) * 0.8 * j, 1.45 * j, Math.sin(a) * 0.8 * j), m3W(M, Math.cos(a2) * 0.5 * j, 1.72 * j, Math.sin(a2) * 0.5 * j), col); } }
-  else if (type === "acacia"){ m3Cone(M, 0, 0, 0.1, 0, 1.05 * j, 3, [0.40, 0.30, 0.20]); m3Octa(M, 0, 1.12 * j, 0, 0.95 * j, 0.2 * j, g(0.38, 0.48, 0.18), rnd() * 3); }
+  else if (type === "acacia"){ m3Cone(M, 0, 0, 0.1, 0, 1.05 * j, 3, [0.40, 0.30, 0.20]); m3LeafCluster(M, 0, 1.12 * j, 0, 0.95 * j, 0.2 * j, g(0.38, 0.48, 0.18), rnd() * 3); }
   else if (type === "swamp"){ m3Cone(M, 0, 0, 0.2, 0, 1.1 * j, 4, [0.26, 0.22, 0.17]); m3Octa(M, 0, 1.15 * j, 0, 0.7 * j, 0.42 * j, g(0.22, 0.32, 0.20), rnd() * 3); }
   else if (type === "mangrove"){ m3Octa(M, 0, 0.5 * j, 0, 0.62 * j, 0.36 * j, g(0.18, 0.40, 0.22), rnd() * 3); for (let i = 0; i < 3; i++){ const a = i * 2.1 + rnd(); m3Tri(M, m3W(M, 0, 0.4 * j, 0), m3W(M, Math.cos(a) * 0.42, 0, Math.sin(a) * 0.42), m3W(M, Math.cos(a + 0.5) * 0.3, 0, Math.sin(a + 0.5) * 0.3), [0.30, 0.24, 0.18]); } }
   else if (type === "cactus"){ m3Box(M, 0, 0, 0.16, 0.16, 0, 0.8 * j, [0.30, 0.46, 0.26]); m3Box(M, 0.22, 0, 0.12, 0.12, 0.3 * j, 0.36 * j, [0.30, 0.46, 0.26]); }
@@ -8707,14 +8787,15 @@ function m3TreeShape(M, type, rnd){ const j = 0.82 + rnd() * 0.36, sh = 0.85 + r
 /* which plants grow in each kind of land, and how thickly (plants per map cell) */
 const M3_FLORA = { taiga: [["conifer", 3.2], ["pine", 1.4]], tundra: [["drybush", 0.25]], tforest: [["broadleaf", 3.0], ["autumn", 0.5], ["pine", 0.5], ["bush", 0.6]], trainforest: [["pine", 2.4], ["broadleaf", 2.0], ["bush", 0.8]], grassland: [["broadleaf", 0.22], ["bush", 0.4]], steppe: [["drybush", 0.4]],
   savanna: [["acacia", 0.6], ["drybush", 0.6]], monsoon: [["broadleaf", 2.6], ["palm", 0.6], ["bush", 0.8]], jungle: [["jungle", 3.6], ["palm", 0.9], ["bush", 0.8]], scrub: [["drybush", 1.1], ["acacia", 0.12]], hdesert: [["cactus", 0.09], ["drybush", 0.08]], cdesert: [["drybush", 0.1]],
-  marsh: [["reed", 1.2]], swamp: [["swamp", 2.4], ["reed", 0.8]], bog: [["reed", 0.6], ["drybush", 0.3]], mangrove: [["mangrove", 3.0]], beach: [["palm", 0.22]], mountain: [["pine", 0.35], ["drybush", 0.2]], oasis: [["palm", 3.5]] };
+  marsh: [["reed", 1.2]], swamp: [["swamp", 2.4], ["reed", 0.8]], bog: [["reed", 0.6], ["drybush", 0.3]], mangrove: [["mangrove", 3.0]], beach: [["palm", 0.22]], mountain: [["pine", 0.35], ["drybush", 0.2], ["rockcluster", 0.45]], oasis: [["palm", 3.5]] };
+const M3_TREE_TYPES = new Set(["conifer", "pine", "broadleaf", "autumn", "jungle", "palm", "acacia", "swamp", "mangrove", "baobab", "cypress", "olive", "cherry", "bamboo", "emergent"]);
 function m3Flora(M, budget){ const P = G.P, C = G.C; const block = new Uint8Array(N); const mark = (gx, gy, r) => { for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++){ const x = gx + dx, y = gy + dy; if (x >= 0 && y >= 0 && x < W && y < H && dx * dx + dy * dy <= r * r) block[y * W + x] = 1; } };
   for (const s of m3Settlements()) mark(s.gx, s.gy, s.size === "seat" || s.size === "capital" ? 2 : 1); const extra = new Map(); for (const f of feats()) if (f.type === "oasis") cellsIn(f.i, 1, j => extra.set(j, "oasis"));
   let want = 0; for (let i = 0; i < N; i++){ const fl = M3_FLORA[extra.get(i) || P.biome[i]]; if (fl && !block[i]) for (const [, d] of fl) want += d * 2; } const scale = Math.min(1, budget / Math.max(1, want)); let made = 0;
   const DN = typeof densMap === "function" ? densMap(false) : null;
   for (let i = 0; i < N; i++){ if (block[i] || (DN && DN[i] < 0) || (M3.noGrow && M3.noGrow[i])) continue; const b = extra.get(i) || P.biome[i], fl = M3_FLORA[b]; if (!fl) continue; if (b === "beach" && P.temp[i] < 0.55) continue; const x = cx(i), y = cy(i); let sd = (i * 2654435761) >>> 0; const rnd = () => { sd = (sd * 1664525 + 1013904223) >>> 0; return sd / 4294967296; };
     for (const [type, dens] of fl){ const d = dens * 2 * scale; let n = Math.floor(d) + (rnd() < d - Math.floor(d) ? 1 : 0); while (n-- > 0){ const gx = x + rnd() - 0.5, gy = y + rnd() - 0.5, gr = m3HAt(gx, gy); if (gr < 0.013) continue; if (M3.rkc && b === "mountain" && rnd() < 0.5) continue;
-        M.ox = (gx + 0.5 - W / 2) / M3_U; M.oz = (gy + 0.5 - H / 2) / M3_U; M.oy = gr - 0.001; M.c = 1; M.s = 0; M.k = 0.0092 * (0.8 + rnd() * 0.5); m3TreeShape(M, type, rnd); made++; } } } return made; }
+        M.ox = (gx + 0.5 - W / 2) / M3_U; M.oz = (gy + 0.5 - H / 2) / M3_U; M.oy = gr - 0.001; M.c = 1; M.s = 0; M.k = 0.025 * (0.8 + rnd() * 0.5); if (M3_TREE_TYPES.has(type)) m3ShadowDisk(M, 0, 0, 0.48, 0.44, 0.0025, [0.19, 0.20, 0.16], rnd); m3TreeShape(M, type, rnd); made++; } } } return made; }
 /* ---- roads and paths: ribbons laid over the ground ---- */
 function m3Ribbon(M, cells, width, col){ let pts = cells.map(c => [(cx(c) + 0.5 - W / 2) / M3_U, (cy(c) + 0.5 - H / 2) / M3_U]); if (pts.length < 2) return;
   for (let pass = 0; pass < 2; pass++){ const o = [pts[0]]; for (let i = 0; i < pts.length - 1; i++){ const a = pts[i], b = pts[i + 1]; o.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]); } o.push(pts[pts.length - 1]); pts = o; }
@@ -8739,7 +8820,7 @@ function m3Buildings(){ const gl = M3.gl, P = G.P, C = G.C; const key = [M3.hs, 
   const M = m3MeshNew(), hex = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ""); if (!m) return null; const n = parseInt(m[1], 16); return [(n >> 16) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
   try { m3Roads(M); } catch (e) { console.error(e); }
   for (const s of m3Settlements()){ let r = (s.seed * 9301 + 49297) % 233280; const rnd = () => { r = (r * 9301 + 49297) % 233280; return r / 233280; }; rnd();
-    const wx = (s.gx + 0.5 - W / 2) / M3_U, wz = (s.gy + 0.5 - H / 2) / M3_U; if (m3Gy(wx, wz) < -0.02) continue; const S = { wx, wz, rot: rnd() * Math.PI * 2, k: 0.015, taken: [] };
+    const wx = (s.gx + 0.5 - W / 2) / M3_U, wz = (s.gy + 0.5 - H / 2) / M3_U; if (m3Gy(wx, wz) < -0.02) continue; const S = { wx, wz, rot: rnd() * Math.PI * 2, k: 0.0185, taken: [] };
     const base = hex(s.color) || [0.66, 0.33, 0.24], oi = Math.max(0, s.owner | 0), roofs = [M3C.tile, M3C.slate, [0.58, 0.40, 0.24], [0.30, 0.46, 0.44]], roof = roofs[oi % 4].map((v, i) => v * 0.72 + base[i] * 0.28), banner = base.map(v => Math.min(1, v * 1.25 + 0.1)), cult = oi % 3;
     try { if (s.size === "village") m3Village(M, S, rnd, roof); else if (s.size === "town") m3Town(M, S, rnd, roof, cult); else if (s.size === "city") m3City(M, S, rnd, roof, cult, banner, false); else if (s.size === "capital") m3City(M, S, rnd, roof, cult, banner, true);
       else if (s.size === "seat") m3Seat(M, S, rnd, roof, cult, banner); else if (s.size === "castle") m3Castle(M, S, rnd, banner); else if (s.size === "palace"){ m3PalaceCore(M, S, rnd, banner, 0, 0); for (let i = 0; i < 10; i++){ const a = i / 10 * 6.283; m3Put(M, S, Math.cos(a) * 6.4, Math.sin(a) * 6.4, 0); m3Cone(M, 0, 0, 0.32, 0, 2.0, 6, [0.16, 0.36, 0.22]); } } } catch (e) { console.error(e); } }
@@ -8766,15 +8847,18 @@ function m3Spikes(M, w, d, y, col, h){ for (const [sx, sz] of [[-1, -1], [1, -1]
 function m3Pegs(M, x, z, y0, rows, w){ for (let r = 0; r < rows; r++) for (const dx of [-w, 0, w]) m3Box(M, x + dx, z, 0.05, 0.22, y0 + r * 0.5, 0.05, M3_DARK); }
 /* ---- houses ---- */
 function m3HouseS(M, rnd, S, tall){ const st = S.st, P = S.P; if (st === "western"){ m3House(M, rnd, S.roof, tall); return; }
-  const wall = P.walls[(rnd() * P.walls.length) | 0], w = 1.2 + rnd() * 0.7, d = 1.0 + rnd() * 0.4, h = (tall ? 1.35 : 0.8) + rnd() * 0.5;
-  if (st === "sahel"){ if (!tall && rnd() < 0.25){ m3Hut(M, rnd); return; } m3Frus(M, 0, 0, w, d, w * 0.9, d * 0.9, 0, h, wall); m3Spikes(M, w * 0.9, d * 0.9, h, wall); m3Pegs(M, 0, d / 2 - 0.04, h * 0.6, tall ? 2 : 1, w * 0.26); m3Box(M, 0, d / 2, 0.28, 0.08, 0, 0.52, M3_DARK);
+  const wall = P.walls[(rnd() * P.walls.length) | 0], w = 1.2 + rnd() * 0.7, d = 1.0 + rnd() * 0.4, h = (tall ? 1.35 : 0.8) + rnd() * 0.5; if (st === "sahel" && !tall && rnd() < 0.25){ m3Hut(M, rnd); return; } m3ShadowDisk(M, 0, 0, w * 0.68, d * 0.68, 0.0025, [0.20, 0.20, 0.17], rnd);
+  if (st !== "eastasia") m3Box(M, 0, 0, w + 0.16, d + 0.16, -0.13, 0.16, [0.49, 0.47, 0.43]);
+  if (st === "sahel"){ m3Frus(M, 0, 0, w, d, w * 0.9, d * 0.9, 0, h, wall); m3Spikes(M, w * 0.9, d * 0.9, h, wall); m3Pegs(M, 0, d / 2 - 0.04, h * 0.6, tall ? 2 : 1, w * 0.26); m3Box(M, 0, d / 2, 0.28, 0.08, 0, 0.52, M3_DARK);
     if (rnd() < 0.4){ m3Frus(M, -w * 0.16, -d * 0.08, w * 0.5, d * 0.55, w * 0.44, d * 0.5, h, 0.55, m3Tint(wall, 1.04)); m3Spikes(M, w * 0.44, d * 0.5, h + 0.55, wall, 0.2); } if (rnd() < 0.3) m3Box(M, w * 0.3, d / 2 + 0.3, 0.6, 0.6, h * 0.5, 0.05, P.walls[1]); }
   else if (st === "mideast"){ m3Box(M, 0, 0, w, d, 0, h, wall); m3Box(M, 0, 0, w * 1.05, d * 1.05, h, 0.1, m3Tint(wall, 0.92)); const q = rnd(); if (q < 0.3) m3Dome(M, 0, 0, Math.min(w, d) * 0.36, h + 0.1, 6, [0.97, 0.95, 0.89]); else if (q < 0.62){ m3Box(M, w * 0.16, 0, w * 0.55, d * 0.72, h + 0.1, 0.55, wall); m3Box(M, w * 0.16, 0, w * 0.6, d * 0.77, h + 0.65, 0.08, m3Tint(wall, 0.92)); } else if (q < 0.75) m3Box(M, -w * 0.3, -d * 0.25, 0.3, 0.3, h, 0.9, m3Tint(wall, 0.95));
     m3Box(M, 0, d / 2, 0.28, 0.08, 0, 0.55, P.trim); for (const x of [-w * 0.3, w * 0.3]) m3Box(M, x, d / 2, 0.14, 0.06, h * 0.55, 0.2, M3_DARK); if (rnd() < 0.4) m3Box(M, 0, d / 2 + 0.3, w * 0.8, 0.55, h * 0.62, 0.04, rnd() < 0.5 ? S.banner : [0.86, 0.80, 0.66]); }
   else if (st === "eastasia"){ m3Box(M, 0, 0, w * 1.12, d * 1.12, 0, 0.12, P.stone); m3Box(M, 0, 0, w, d, 0.12, h * 0.72, wall); for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) m3Box(M, sx * w * 0.5, sz * d * 0.5, 0.09, 0.09, 0.12, h * 0.72, P.trim); m3Box(M, 0, d / 2, 0.3, 0.06, 0.12, 0.5, M3_DARK);
     m3Eave(M, 0, 0, w, d, 0.12 + h * 0.72, S.roof); if (tall){ m3Box(M, 0, 0, w * 0.68, d * 0.66, 0.4 + h * 0.72, 0.5, wall); m3Eave(M, 0, 0, w * 0.68, d * 0.66, 0.9 + h * 0.72, S.roof); } }
   else { m3Box(M, 0, 0, w, d, 0, h, wall, false); m3Roof(M, 0, 0, w, d, h, 0.3, S.roof, wall); m3Box(M, 0, d / 2, 0.26, 0.06, 0, 0.5, P.trim); for (const x of [-w * 0.3, w * 0.3]) m3Box(M, x, d / 2, 0.13, 0.05, h * 0.55, 0.18, P.trim);
-    if (tall){ for (const x of [-w * 0.38, -w * 0.13, w * 0.13, w * 0.38]) m3Cyl(M, x, d / 2 + 0.34, 0.07, 0, h, 5, M3_MARBLE); m3Box(M, 0, d / 2 + 0.22, w * 1.02, 0.5, h, 0.09, M3_MARBLE); } } }
+    if (tall){ for (const x of [-w * 0.38, -w * 0.13, w * 0.13, w * 0.38]) m3Cyl(M, x, d / 2 + 0.34, 0.07, 0, h, 5, M3_MARBLE); m3Box(M, 0, d / 2 + 0.22, w * 1.02, 0.5, h, 0.09, M3_MARBLE); } }
+  m3DoorArch(M, 0, d / 2, 0.26, 0.58, [0.20, 0.12, 0.08], P.trim);
+  for (const x of [-w * 0.3, w * 0.3]) m3Box(M, x, d / 2 + 0.014, 0.12, 0.035, h * 0.55, 0.19, M3_DARK); }
 /* ---- holy places ---- */
 function m3TempleS(M, rnd, S, big){ const st = S.st, P = S.P, s = big ? 1.25 : 1; if (st === "western"){ m3Temple(M, S.cult, S.roof, big); return; }
   if (st === "sahel"){ const mud = P.walls[0]; m3Frus(M, 0, 0, 3.4 * s, 2.6 * s, 3.2 * s, 2.45 * s, 0, 1.5 * s, mud); // the great mud mosque: buttressed walls, three towers, timber pegs
@@ -8834,7 +8918,9 @@ function m3PalaceS(M, S, rnd, lx, lz){ const st = S.st, P = S.P; if (st === "gre
 function m3FieldS(M, S, lx, lz, w, d, ang, rnd){ const cols = S.P.field || [[0.76, 0.68, 0.36], [0.52, 0.62, 0.30], [0.62, 0.50, 0.32], [0.66, 0.72, 0.38]], strips = 3 + ((rnd() * 3) | 0), c = Math.cos(S.rot + ang), s = Math.sin(S.rot + ang), c0 = Math.cos(S.rot), s0 = Math.sin(S.rot);
   const ox = S.wx + (lx * c0 + lz * s0) * S.k, oz = S.wz + (-lx * s0 + lz * c0) * S.k, pt = (x, z) => { const wx = ox + (x * c + z * s) * S.k, wz = oz + (-x * s + z * c) * S.k; return [wx, Math.max(m3Gy(wx, wz), 0.012) + 0.0022, wz]; };
   for (let i = 0; i < strips; i++){ const x0 = -w / 2 + w * i / strips, x1 = x0 + w / strips * 0.92, col = cols[(i + ((rnd() * 4) | 0)) % cols.length]; for (let q = 0; q < 2; q++){ const z0 = -d / 2 + d * q / 2, z1 = z0 + d / 2; m3Quad(M, pt(x0, z0), pt(x1, z0), pt(x1, z1), pt(x0, z1), col); } } }
-function m3Shade(M, S, rnd, lx, lz, type, sc){ m3Put(M, S, lx, lz, 0); const k = M.k; M.k = k * (sc || 1.3); m3TreeShape(M, type, rnd); M.k = k; }
+function m3LaneS(M, S, a, b, width, col){ const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz) || 1, nx = -dz / len * width / 2, nz = dx / len * width / 2, steps = Math.ceil(len / 0.65), c = Math.cos(S.rot), s = Math.sin(S.rot), pt = (t, side) => { const lx = a[0] + dx * t + nx * side, lz = a[1] + dz * t + nz * side, wx = S.wx + (lx * c + lz * s) * S.k, wz = S.wz + (-lx * s + lz * c) * S.k; return [wx, Math.max(m3Gy(wx, wz), 0.012) + 0.0024, wz]; };
+  for (let i = 0; i < steps; i++){ const t0 = i / steps, t1 = (i + 1) / steps; m3Quad(M, pt(t0, -1), pt(t0, 1), pt(t1, 1), pt(t1, -1), i % 2 ? m3Tint(col, 0.91) : col); } }
+function m3Shade(M, S, rnd, lx, lz, type, sc){ m3Put(M, S, lx, lz, 0); const k = M.k; M.k = k * (sc || 1.3); if (M3_TREE_TYPES.has(type)) m3ShadowDisk(M, 0, 0, 0.48, 0.44, 0.0025, [0.19, 0.20, 0.16], rnd); m3TreeShape(M, type, rnd); M.k = k; }
 function m3VillageS(M, S, rnd){ const st = S.st, kind = (rnd() * 3) | 0, n = 5 + ((rnd() * 4) | 0);
   if (kind === 0){ S.taken.push([0, 0, 0.9]); m3Shade(M, S, rnd, 0, 0, st === "sahel" ? "baobab" : S.P.tree, 1.6); for (let i = 0; i < n; i++){ const a = i / n * Math.PI * 2 + rnd() * 0.3, d = 2.0 + rnd() * 0.5; m3Put(M, S, Math.cos(a) * d, Math.sin(a) * d, -a - Math.PI / 2); if (st === "sahel" || st === "western") m3Hut(M, rnd); else m3HouseS(M, rnd, S, false); S.taken.push([Math.cos(a) * d, Math.sin(a) * d, 0.85]); }
     for (let i = 0; i < 9; i++){ const a = i / 9 * Math.PI * 2; m3Put(M, S, Math.cos(a) * 3.5, Math.sin(a) * 3.5, -a); m3Box(M, 0, 0, 0.1, 2.0, 0, 0.3, S.P.trim); } }
@@ -8846,17 +8932,18 @@ function m3VillageS(M, S, rnd){ const st = S.st, kind = (rnd() * 3) | 0, n = 5 +
   const nf = 2 + ((rnd() * 3) | 0); for (let i = 0; i < nf; i++){ const a = rnd() * Math.PI * 2, d = 5.0 + rnd() * 1.4; m3FieldS(M, S, Math.cos(a) * d, Math.sin(a) * d, 2.4 + rnd() * 1.4, 1.9 + rnd(), rnd() * 3, rnd); }
   for (let i = 0; i < 4; i++){ const a = rnd() * 6.3, d = 3.8 + rnd() * 1.2; m3Shade(M, S, rnd, Math.cos(a) * d, Math.sin(a) * d, st === "eastasia" && rnd() < 0.5 ? "bamboo" : S.P.tree, 1.1); } }
 function m3TownS(M, S, rnd){ S.taken.push([0, 0, 1.9]); m3Put(M, S, 0, -0.2, 0); m3HallS(M, rnd, S); const tp = [3.3, -2.9]; S.taken.push([tp[0], tp[1], 2.4]); m3Put(M, S, tp[0], tp[1], 0.3); m3TempleS(M, rnd, S, false);
+  const paving = S.st === "sahel" ? [0.45, 0.36, 0.27] : S.st === "mideast" ? [0.62, 0.54, 0.40] : [0.53, 0.49, 0.41]; m3LaneS(M, S, [-6.3, 0], [6.3, 0], 0.24, paving); m3LaneS(M, S, [0, -6.3], [0, 6.3], 0.24, paving); m3LaneS(M, S, [0, -1.6], tp, 0.2, paving);
   for (let i = 0; i < 18; i++){ const street = i % 2, t = (Math.floor(i / 2) - 4) * 1.7 + rnd() * 0.3, off = (i % 4 < 2 ? 1 : -1) * (1.5 + rnd() * 0.2), lx = street ? off : t, lz = street ? t : off; if (!m3Free(S, lx, lz, 0.95)) continue; S.taken.push([lx, lz, 0.95]); m3Put(M, S, lx, lz, street ? (off > 0 ? -Math.PI / 2 : Math.PI / 2) : (off > 0 ? Math.PI : 0)); m3HouseS(M, rnd, S, rnd() < 0.25); }
   for (let i = 0; i < 6; i++){ const p = m3Spot(S, rnd, 4.2, 6.0, 1.0); if (p){ m3Put(M, S, p[0], p[1], rnd() * 6.3); m3HouseS(M, rnd, S, false); } }
   if (S.st === "western" && rnd() < 0.6){ const p = m3Spot(S, rnd, 5.6, 6.6, 1); if (p){ m3Put(M, S, p[0], p[1], rnd() * 6.3); m3Windmill(M); } }
-  for (let i = 0; i < 5; i++){ const p = m3Spot(S, rnd, 2.5, 6.5, 0.6); if (p) m3Shade(M, S, rnd, p[0], p[1], S.P.tree, 1.1); }
+  for (let i = 0; i < 8; i++){ const p = m3Spot(S, rnd, 2.5, 6.5, 0.6); if (p) m3Shade(M, S, rnd, p[0], p[1], S.P.tree, 1.1); }
   for (let i = 0; i < 2; i++){ const a = rnd() * 6.3; m3FieldS(M, S, Math.cos(a) * 8.0, Math.sin(a) * 8.0, 2.8, 2.1, rnd() * 3, rnd); } }
-function m3CityS(M, S, rnd, cap){ const R = cap ? 8.2 : 6.8; m3WallsS(M, S, R, cap ? 11 : 9, 1.15, rnd);
+function m3CityS(M, S, rnd, cap){ const R = cap ? 8.2 : 6.8; m3WallsS(M, S, R, cap ? 11 : 9, 1.15, rnd); const paving = S.st === "sahel" ? [0.45, 0.36, 0.27] : S.st === "mideast" ? [0.62, 0.54, 0.40] : [0.53, 0.49, 0.41]; if (S.gate) m3LaneS(M, S, S.gate, [0, 0], 0.32, paving);
   if (cap){ const a = rnd() * 6.3, d = R * 0.46; S.taken.push([Math.cos(a) * d, Math.sin(a) * d, 3.0]); m3Put(M, S, Math.cos(a) * d, Math.sin(a) * d, rnd()); m3KeepS(M, S, rnd); }
   S.taken.push([0, 0, 1.3]); m3Put(M, S, 0, 0, 0); if (S.st === "sahel"){ m3Frus(M, 0, 0, 1.0, 1.0, 0.6, 0.6, 0, 3.0, S.P.stone); m3Pyr(M, 0, 0, 0.3, 0.3, 3.0, 0.6, S.P.walls[2]); m3Pegs(M, 0, 0.36, 1.0, 3, 0.15); } else if (S.st === "eastasia"){ m3Box(M, 0, 0, 1.2, 1.2, 0, 1.4, S.P.stone); m3Box(M, 0, 0, 0.8, 0.8, 1.4, 0.6, S.P.trim); m3Eave(M, 0, 0, 0.9, 0.9, 2.0, S.roof); } else if (S.st === "mideast"){ m3Cyl(M, 0, 0, 0.36, 0, 3.2, 7, S.P.walls[2]); m3Cyl(M, 0, 0, 0.48, 2.6, 0.12, 7, S.P.trim, S.P.trim); m3Cone(M, 0, 0, 0.4, 3.2, 0.8, 7, S.P.trim); } else if (S.st === "greek"){ m3Cyl(M, 0, 0, 0.22, 0, 2.4, 7, M3_MARBLE); m3Box(M, 0, 0, 0.6, 0.6, 2.4, 0.12, M3_MARBLE); m3Octa(M, 0, 2.9, 0, 0.2, 0.36, M3C.gold); } else { m3Box(M, 0, 0, 0.9, 0.9, 0, 3.0, M3C.stone); m3Pyr(M, 0, 0, 1.0, 1.0, 3.0, 1.3, S.roof); }
   const tp = m3Spot(S, rnd, 2.6, R * 0.55, 2.6); if (tp){ m3Put(M, S, tp[0], tp[1], rnd() * 6.3); m3TempleS(M, rnd, S, true); } const hp = m3Spot(S, rnd, 2.0, R * 0.62, 2.0); if (hp){ m3Put(M, S, hp[0], hp[1], rnd() * 6.3); m3HallS(M, rnd, S); }
   for (let i = 0; i < (cap ? 36 : 28); i++){ const p = m3Spot(S, rnd, 1.4, R - 1.2, 0.9); if (!p) continue; m3Put(M, S, p[0], p[1], -p[2] + Math.PI / 2 + (rnd() - 0.5) * 0.5); m3HouseS(M, rnd, S, rnd() < 0.5); }
-  for (let i = 0; i < 4; i++){ const p = m3Spot(S, rnd, 1.5, R - 1.5, 0.5); if (p) m3Shade(M, S, rnd, p[0], p[1], S.P.tree, 1.0); }
+  for (let i = 0; i < 10; i++){ const p = m3Spot(S, rnd, 1.5, R - 1.5, 0.5); if (p) m3Shade(M, S, rnd, p[0], p[1], S.P.tree, 1.0); }
   for (let i = 0; i < 8; i++){ const a = rnd() * 6.3, d = R + 1.5 + rnd() * 1.8; if (S.gate && Math.hypot(Math.cos(a) * d - S.gate[0], Math.sin(a) * d - S.gate[1]) < 1.8) continue; m3Put(M, S, Math.cos(a) * d, Math.sin(a) * d, rnd() * 6.3); m3HouseS(M, rnd, S, false); } }
 function m3SeatS(M, S, rnd){ const R = 11.5; m3WallsS(M, S, R, 13, 1.35, rnd); m3PalaceS(M, S, rnd, 0, -2.8); const tp = m3Spot(S, rnd, 6.4, 8.6, 2.6); if (tp){ m3Put(M, S, tp[0], tp[1], rnd() * 6.3); m3TempleS(M, rnd, S, true); } const hp = m3Spot(S, rnd, 6, 9, 2.0); if (hp){ m3Put(M, S, hp[0], hp[1], rnd() * 6.3); m3HallS(M, rnd, S); }
   for (let i = 0; i < 50; i++){ const p = m3Spot(S, rnd, 3.4, R - 1.2, 0.9); if (!p) continue; m3Put(M, S, p[0], p[1], -p[2] + Math.PI / 2 + (rnd() - 0.5) * 0.5); m3HouseS(M, rnd, S, rnd() < 0.6); }
@@ -8903,9 +8990,19 @@ function m3RibbonS(M, f, width, col){ let cells = f.cells; if (!cells || cells.l
 function m3RibbonPts(M, pts, width, col, passes){ for (let pass = 0; pass < (passes || 0); pass++){ const o = [pts[0]]; for (let i = 0; i < pts.length - 1; i++){ const a = pts[i], b = pts[i + 1]; o.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]); } o.push(pts[pts.length - 1]); pts = o; }
   const side = (i, s) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; let dx = b[0] - a[0], dz = b[1] - a[1]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; const x = pts[i][0] - dz * width * s, z = pts[i][1] + dx * width * s; return [x, Math.max(m3Gy(x, z), 0.013) + 0.0028, z]; };
   for (let i = 0; i < pts.length - 1; i++) m3Quad(M, side(i, -1), side(i, 1), side(i + 1, 1), side(i + 1, -1), i % 2 ? col : m3Tint(col, 0.94)); }
-m3Roads = function(M){ const C = G.C; if (layers.routes) for (const e of C.edges){ if (e.kind === "sea lane") continue; let run = []; const flush = () => { if (run.length > 1) m3RibbonS(M, { cells: run }, 0.0085, [0.70, 0.60, 0.44]); run = []; }; for (const c of e.path){ if (C.isLand(c)) run.push(c); else flush(); } flush(); }
-  for (const f of feats()){ if (f.type === "road") m3RibbonS(M, f, 0.011 * roadK(f), [0.74, 0.65, 0.48]); if (f.type === "path") m3RibbonS(M, f, 0.0048 * roadK(f), [0.64, 0.54, 0.38]); }
-  const all = [...C.cities.map(c => c.i), ...m3Places().map(f => f.i)]; for (const f of m3Places()){ let best = -1, bd = 13; for (const o of all){ if (o === f.i) continue; const d = Math.hypot(cx(o) - cx(f.i), cy(o) - cy(f.i)); if (d < bd){ bd = d; best = o; } } if (best >= 0){ const line = lineCells(f.i, best); if (line.every(c => C.isLand(c))) m3RibbonS(M, { cells: line, straight: true }, 0.0048, [0.64, 0.54, 0.38]); } } };
+m3Roads = function(M){ const C = G.C, P = G.P, waterCells = new Set(), bridgeMarks = feats().filter(f => f.type === "bridge"); for (const f of feats()) if (f.cells && ["river", "stream", "canal"].includes(f.type)) for (const c of f.cells) waterCells.add(c);
+  const river = c => waterCells.has(c) || !!(P.flux && P.flux[c] > P.riverT && P.elev[c] >= 0), bridged = new Set();
+  const route = (path, width, col) => { if (!path || path.length < 2) return; let run = []; const flush = () => { if (run.length > 1) m3RibbonS(M, { cells: run }, width, col); run = []; };
+    for (let k = 0; k < path.length; k++){ const c = path[k]; if (!C.isLand(c)){ flush(); continue; } if (!river(c)){ run.push(c); continue; }
+      flush(); let end = k; while (end + 1 < path.length && C.isLand(path[end + 1]) && river(path[end + 1])) end++;
+      const before = path[Math.max(0, k - 1)], after = path[Math.min(path.length - 1, end + 1)], key = Math.min(before, after) + ":" + Math.max(before, after), mid = path[Math.floor((k + end) / 2)];
+      if (before !== c && after !== c && !bridged.has(key) && !bridgeMarks.some(f => Math.hypot(cx(f.i) - cx(mid), cy(f.i) - cy(mid)) < 2)){
+        bridged.add(key); m3Landmark(M, { i: mid, type: "bridge", ang: Math.atan2(cy(after) - cy(before), cx(after) - cx(before)), sc: 1 }); }
+      k = end; }
+    flush(); };
+  if (layers.routes) for (const e of C.edges) if (e.kind !== "sea lane") route(e.path, 0.0085, [0.70, 0.60, 0.44]);
+  for (const f of feats()){ if (f.type === "road") route(f.cells, 0.011 * roadK(f), [0.74, 0.65, 0.48]); if (f.type === "path") route(f.cells, 0.0048 * roadK(f), [0.64, 0.54, 0.38]); }
+  const all = [...C.cities.map(c => c.i), ...m3Places().map(f => f.i)]; for (const f of m3Places()){ let best = -1, bd = 13; for (const o of all){ if (o === f.i) continue; const d = Math.hypot(cx(o) - cx(f.i), cy(o) - cy(f.i)); if (d < bd){ bd = d; best = o; } } if (best >= 0) route(lineCells(f.i, best), 0.0048, [0.64, 0.54, 0.38]); } };
 /* ---- waterways and pools cut into the ground; "cut" roads level it ---- */
 function m3Carve(hf, nx, ny, sub){ const P = G.P, dig = new Float32Array(nx * ny); let any = false;
   const stamp = (gx, gy, rad, depth) => { const fi = (gx + 0.5) * sub, fj = (gy + 0.5) * sub, r = rad * sub; for (let j = Math.max(0, Math.floor(fj - r)); j <= Math.min(ny - 1, Math.ceil(fj + r)); j++) for (let i = Math.max(0, Math.floor(fi - r)); i <= Math.min(nx - 1, Math.ceil(fi + r)); i++){ const d = Math.hypot(i - fi, j - fj) / r; if (d >= 1) continue; const v = depth * (1 - d * d), q = j * nx + i; if (v > dig[q]){ dig[q] = v; any = true; } } };
@@ -8928,6 +9025,7 @@ m3Buildings = function(){ const gl = M3.gl, P = G.P, C = G.C, sc = m3MarkScale()
     const wx = (s.gx + 0.5 - W / 2) / M3_U, wz = (s.gy + 0.5 - H / 2) / M3_U; if (m3Gy(wx, wz) < -0.02 && !s.wet) continue; const st = m3StyleFor(s), Pl = M3P[st], base = hex(s.color) || [0.66, 0.33, 0.24], oi = Math.max(0, s.owner | 0); M3.styles[st] = (M3.styles[st] || 0) + 1;
     const roof = st === "western" ? [M3C.tile, M3C.slate, [0.58, 0.40, 0.24], [0.30, 0.46, 0.44]][oi % 4].map((v, i) => v * 0.72 + base[i] * 0.28) : st === "sahel" ? Pl.walls[1] : st === "mideast" ? Pl.walls[2] : Pl.tile.map((v, i) => v * 0.84 + base[i] * 0.16);
     const S = { wet: !!s.wet, wx, wz, rot: rnd() * Math.PI * 2, k: 0.015 * (typeof realmScale === "function" ? realmScale(ix(s.gx, s.gy)) : 1) * (s.sc || 1), taken: [], st, P: Pl, roof, banner: base.map(v => Math.min(1, v * 1.25 + 0.1)), cult: oi % 3 };
+    if (["town", "city", "capital", "seat"].includes(s.size)) m3Plaza(M, S, s.size === "town" ? 2.2 : 3.0);
     try { if (s.size === "village") m3VillageS(M, S, rnd); else if (s.size === "town") m3TownS(M, S, rnd); else if (s.size === "city") m3CityS(M, S, rnd, false); else if (s.size === "capital") m3CityS(M, S, rnd, true); else if (s.size === "seat") m3SeatS(M, S, rnd); else if (s.size === "castle") m3CastleS(M, S, rnd);
       else if (s.size === "palace"){ m3PalaceS(M, S, rnd, 0, 0); for (let i = 0; i < 10; i++){ const a = i / 10 * 6.283; m3Shade(M, S, rnd, Math.cos(a) * 6.6, Math.sin(a) * 6.6, st === "sahel" ? "acacia" : st === "eastasia" ? "cherry" : "cypress", 1.2); } } } catch (e) { console.error(e); } }
   const mk = (kind, f) => typeof mkScale === "function" ? mkScale(kind, f) : sc; for (const a of C.anomalies) m3StarS(M, a.i, mk("star")); for (const f of feats()){ if (f.type === "star") m3StarS(M, f.i, mk("star", f)); else if (f.type === "battle") m3BattleS(M, f.i, mk("battle", f)); else if (f.type === "event") m3EventS(M, f.i, mk("event", f)); }
@@ -8989,6 +9087,8 @@ function mapShown(){ const m = $("#map"); return !!(m && (m.offsetParent || (typ
     if ((e.ctrlKey || e.metaKey) && !e.altKey && mapShown() && !mapTyping(e.target)){ const k = (e.key || "").toLowerCase(); if (k === "z" || k === "y"){ e.preventDefault(); e.stopImmediatePropagation(); if (k === "y" || e.shiftKey) mapRedo(); else mapUndo(); } } }, true);
   window.addEventListener("keyup", e => { if (e.key === "Shift") setShift(false); }, true);
   window.addEventListener("blur", () => setShift(false));
+  document.addEventListener("visibilitychange", () => { if (document.hidden) setShift(false); });
+  document.addEventListener("lostpointercapture", e => { if (e.target && e.target.matches && e.target.matches("#map, #map3d")) setShift(false); }, true);
 })();
 
 /* ---------- undo and redo for the map, quick: the map redraws at once, the slower story panels catch up a moment later ---------- */
@@ -9065,15 +9165,16 @@ function tools3Setup(){ if ($("#mapRedo")) return; const u = $("#mapUndo");
   t3Buttons(); mapUndoUI(); }
 { const base = initMapTools; initMapTools = function(){ const r = base.apply(this, arguments); try { tools3Setup(); } catch (e) { console.error(e); } return r; }; }
 /* the grab-and-drag in 3D: the spot you press stays under the pointer as you drag */
-function m3PlaneHit(ev, y){ if (!M3.inv) return null; const r = $("#map3d").getBoundingClientRect(), nx = (ev.clientX - r.left) / r.width * 2 - 1, ny = 1 - (ev.clientY - r.top) / r.height * 2, m = M3.inv;
+function m3PlaneHit(ev, y, inv){ const m = inv || M3.inv; if (!m) return null; const r = $("#map3d").getBoundingClientRect(), nx = (ev.clientX - r.left) / r.width * 2 - 1, ny = 1 - (ev.clientY - r.top) / r.height * 2;
   const un = (x, yy, z) => { const w = m[3] * x + m[7] * yy + m[11] * z + m[15]; return [(m[0] * x + m[4] * yy + m[8] * z + m[12]) / w, (m[1] * x + m[5] * yy + m[9] * z + m[13]) / w, (m[2] * x + m[6] * yy + m[10] * z + m[14]) / w]; };
   const a = un(nx, ny, -1), b = un(nx, ny, 1), dy = b[1] - a[1]; if (Math.abs(dy) < 1e-9) return null; const t = (y - a[1]) / dy; if (t < 0) return null; return [a[0] + (b[0] - a[0]) * t, a[2] + (b[2] - a[2]) * t]; }
-function m3GrabStart(e){ const h = m3Ray(e); if (!h) return { y: m3TY(), fallback: true }; return { y: h.y, x: h.x, z: h.z }; }
+function m3GrabStart(e){ m3Mats(); const targetY = m3TY(), h = m3Ray(e); if (!h) return { y: targetY, targetY, fallback: true }; return { y: h.y, x: h.x, z: h.z, targetY }; }
 function m3GrabMove(g, e){ if (g.fallback) return; m3Pin(e, g); }
-/* camera matrices for the current view, the same way the renderer makes them */
-function m3Mats(){ const near = Math.max(0.006, Math.min(0.08, M3.dist * 0.01)); M3.mvp = m3Mul(m3Persp(0.7, M3.w / M3.h, near, 200), m3Look(m3Eye(), [M3.tx, m3TY(), M3.tz])); M3.inv = m3Inv(M3.mvp); }
+/* camera matrices for the current or target view */
+function m3Mats(target, fixedY){ const tx = target ? M3.targetTx : M3.tx, tz = target ? M3.targetTz : M3.tz, dist = target ? M3.targetDist : M3.dist, yaw = target ? M3.targetYaw : M3.yaw, pitch = target ? M3.targetPitch : M3.pitch, lift = target ? M3.targetLift : M3.lift, cp = Math.cos(pitch), ty = fixedY == null ? m3TYAt(tx, tz) + lift : fixedY;
+  const eye = [tx + dist * Math.sin(yaw) * cp, ty + dist * Math.sin(pitch), tz + dist * Math.cos(yaw) * cp], mvp = m3Mul(m3Projection(dist), m3Look(eye, [tx, ty, tz])); if (target){ M3.targetMvp = mvp; M3.targetInv = m3Inv(mvp); } else { M3.mvp = mvp; M3.inv = m3Inv(mvp); } }
 /* keep a spot of ground (h: x, y, z) under the pointer: used by grabbing and by zooming toward the pointer */
-function m3Pin(e, h){ for (let n = 0; n < 3; n++){ m3Mats(); const p = m3PlaneHit(e, h.y); if (!p) break; const dx = h.x - p[0], dz = h.z - p[1]; M3.tx += dx; M3.tz += dz; m3Clamp(); if (Math.abs(dx) + Math.abs(dz) < 1e-5) break; } m3Mats(); }
+function m3Pin(e, h){ const fixedY = h.targetY; for (let n = 0; n < 3; n++){ m3Mats(true, fixedY); const p = m3PlaneHit(e, h.y, M3.targetInv); if (!p) break; const dx = h.x - p[0], dz = h.z - p[1]; M3.targetTx += dx; M3.targetTz += dz; m3Clamp(); if (Math.abs(dx) + Math.abs(dz) < 1e-5) break; } m3Mats(true, fixedY); }
 
 /* ---------- road widths, and the smoothing layer (how much rough detail the 3D ground loses) ---------- */
 function roadK(f){ return f && f.sz != null ? (0.5 + f.sz * 0.25) / 1.75 : 1; }
@@ -9096,6 +9197,18 @@ Object.assign(M3_FLORA, { marsh: [["reedtall", 1.3], ["tuft", 1.2]], tidalflat: 
   if (type === "yucca"){ m3Cone(M, 0, 0, 0.06, 0, 0.6 * j, 3, [0.42, 0.36, 0.26]); const top = 0.62 * j, c = g(0.30, 0.46, 0.26); for (let k = 0; k < 7; k++){ const a = k / 7 * 6.28 + rnd(); m3Tri(M, m3W(M, 0, top, 0), m3W(M, Math.cos(a) * 0.32, top + 0.3 * j, Math.sin(a) * 0.32), m3W(M, Math.cos(a + 0.2) * 0.3, top + 0.24 * j, Math.sin(a + 0.2) * 0.3), c); } return; }
   if (type === "barrel"){ m3Octa(M, 0, 0.12, 0, 0.13 * j, 0.14 * j, g(0.62, 0.58, 0.26), rnd() * 3); return; }
   if (type === "dunegrass"){ const c = g(0.62, 0.62, 0.36); for (let k = 0; k < 3; k++){ const a = rnd() * 6.28, d = rnd() * 0.2; m3Cone(M, Math.cos(a) * d, Math.sin(a) * d, 0.05, 0, 0.26 * j, 3, c); } return; }
+  if (type === "rockcluster"){ const cols = [g(0.43, 0.42, 0.39), g(0.34, 0.36, 0.35), g(0.50, 0.47, 0.41)]; m3Octa(M, 0, 0.16 * j, 0, 0.3 * j, 0.2 * j, cols[0], rnd() * 3); for (let k = 0; k < 2; k++){ const a = rnd() * 6.28, d = 0.24 + rnd() * 0.18; m3Octa(M, Math.cos(a) * d, (0.09 + rnd() * 0.07) * j, Math.sin(a) * d, 0.16 * j, 0.12 * j, cols[k + 1], rnd() * 3); } return; }
+  if (type === "conifer" || type === "pine"){ base(M, type, rnd); const pine = type === "pine", tiers = pine ? [0.82, 1.48] : [0.92, 1.42];
+    m3Cone(M, 0, 0, 0.075 * j, 0, 0.72 * j, 5, [0.30, 0.21, 0.14]); m3TreeRoots(M, j, rnd);
+    for (let tier = 0; tier < tiers.length; tier++) for (let k = 0; k < 3; k++){ const a = k / 3 * 6.283 + rnd() * 0.5 + tier * 0.7, r = (pine ? 0.34 : 0.30) * j, col = (tier + k) % 2 ? g(0.14, 0.34, 0.22) : g(0.10, 0.29, 0.18);
+      m3LeafCluster(M, Math.cos(a) * r, tiers[tier] * j + (rnd() - 0.5) * 0.16, Math.sin(a) * r, (pine ? 0.25 : 0.23) * j, 0.25 * j, col, rnd() * 3); } return; }
+  if (type === "palm"){ base(M, type, rnd); const top = m3W(M, 0, 1.75 * j, 0), col = g(0.22, 0.48, 0.18); for (let k = 0; k < 3; k++){ const a = k / 3 * 6.283 + rnd() * 0.25, a2 = a + 0.5;
+      m3Tri(M, top, m3W(M, Math.cos(a) * 0.92 * j, 1.37 * j, Math.sin(a) * 0.92 * j), m3W(M, Math.cos(a2) * 0.57 * j, 1.70 * j, Math.sin(a2) * 0.57 * j), k % 2 ? col : g(0.28, 0.53, 0.20)); } return; }
+  if (type === "broadleaf" || type === "jungle" || type === "autumn"){ base(M, type, rnd); const jungle = type === "jungle", autumn = type === "autumn", count = 4, crown = (jungle ? 1.7 : 1.22) * j;
+    m3TreeRoots(M, j, rnd); m3TreeBoughs(M, j, jungle ? 5 : 4, jungle ? 1.7 : 1.22, rnd);
+    for (let k = 0; k < count; k++){ const a = k / count * 6.283 + rnd() * 0.35, d = (jungle ? 0.4 : 0.32) * j, shade = 0.88 + rnd() * 0.24, col = autumn ? (rnd() < 0.5 ? [0.65, 0.37, 0.12] : [0.53, 0.48, 0.14]) : jungle ? (k % 2 ? [0.13, 0.39, 0.15] : [0.08, 0.31, 0.12]) : (k % 2 ? [0.28, 0.48, 0.18] : [0.22, 0.40, 0.15]);
+      m3LeafCluster(M, Math.cos(a) * d, crown + (rnd() - 0.5) * 0.28 * j, Math.sin(a) * d, (jungle ? 0.38 : 0.34) * j, (jungle ? 0.3 : 0.32) * j, col.map(v => v * shade), rnd() * 3); } return; }
+  if (type === "acacia"){ base(M, type, rnd); m3TreeRoots(M, j, rnd); m3TreeBoughs(M, j, 4, 1.12, rnd); for (let k = 0; k < 4; k++){ const a = k / 4 * 6.283 + rnd() * 0.3; m3LeafCluster(M, Math.cos(a) * 0.46 * j, (1.1 + (rnd() - 0.5) * 0.08) * j, Math.sin(a) * 0.46 * j, 0.34 * j, 0.14 * j, g(k % 2 ? 0.34 : 0.42, 0.47, 0.17), rnd() * 3); } return; }
   return base(M, type, rnd); }; }
 /* nothing grows in a river, a canal, a lake or a spring: the cells they run through are kept clear */
 function noGrowMask(){ const P = G.P, m = new Uint8Array(N); for (let i = 0; i < N; i++){ const b = P.biome[i]; if (b === "lake" || b === "saltflat" || (P.flux && P.riverT && P.elev[i] > 0 && P.flux[i] > P.riverT)) m[i] = 1; }
@@ -9318,16 +9431,24 @@ function m3Landmark(M, f){ const S = m3SFor(f, f.i); let r = (f.i * 9301 + 49297
   else if (t === "temple"){ m3Put(M, S, 0, 0, 0); m3TempleS(M, rnd, S, true); }
   else if (t === "market"){ const aw = [[0.78, 0.25, 0.18], [0.92, 0.80, 0.36], [0.24, 0.48, 0.66], [0.40, 0.62, 0.30]]; for (let a = 0; a < 3; a++) for (let b = 0; b < 2; b++){ m3Put(M, S, (a - 1) * 1.6, (b - 0.5) * 2.2, 0); m3Box(M, 0, 0, 1.0, 0.8, 0, 0.55, P.walls[0]); m3Pyr(M, 0, 0, 1.25, 1.0, 0.55, 0.35, aw[(a + b * 3) % 4]); } m3Put(M, S, 0, 0, 0); m3Cyl(M, 0, 0, 0.35, 0, 0.35, 6, P.stone); }
   else if (t === "harbour"){ const wood = [0.46, 0.34, 0.22]; m3Put(M, S, 0, 0, 0); m3Box(M, -1.4, 0, 1.8, 1.4, 0, 1.0, P.walls[0]); m3Roof(M, -1.4, 0, 1.8, 1.4, 1.0, 0.35, S.roof, P.walls[0]); m3Box(M, 2.6, 0, 5.2, 0.7, -0.05, 0.2, wood); m3Box(M, 4.6, 0, 0.6, 3.2, -0.05, 0.2, wood);
-    for (const [x, z] of [[3.4, 1.4], [5.6, -1.2]]){ m3Put(M, S, x, z, 0); m3Box(M, 0, 0, 1.6, 0.55, -0.1, 0.3, [0.40, 0.28, 0.18]); m3Cone(M, 0, 0, 0.05, 0.2, 1.4, 3, wood); m3Tri(M, m3W(M, 0.05, 1.5, 0), m3W(M, 0.05, 0.45, 0), m3W(M, 0.8, 0.5, 0), [0.95, 0.92, 0.84]); } }
-  else if (t === "bridge"){ const ca = Math.cos(f.ang || 0) * 0.052 * (f.sc || 1), sa = Math.sin(f.ang || 0) * 0.052 * (f.sc || 1), gL = m3Gy(S.wx + ca, S.wz + sa), gR = m3Gy(S.wx - ca, S.wz - sa); m3Put(M, S, 0, 0, 0); const g0 = M.oy, top = Math.max(gL, gR, g0 + 0.004) + 0.002; M.oy = top; const drop = (top - g0) / S.k + 0.3;
-    m3Box(M, 0, 0, 10, 1.3, 0, 0.3, P.stone); m3Box(M, 0, 0.6, 10, 0.12, 0.3, 0.25, P.stoneD); m3Box(M, 0, -0.6, 10, 0.12, 0.3, 0.25, P.stoneD); for (const x of [-2.5, 2.5]) m3Box(M, x, 0, 0.6, 1.1, -drop, drop, P.stoneD); }
+    for (const [x, z] of [[3.4, 1.4], [5.6, -1.2]]){ m3Put(M, S, x, z, 0); m3Box(M, 0, 0, 1.6, 0.55, -0.1, 0.3, [0.40, 0.28, 0.18]); m3Cone(M, 0, 0, 0.05, 0.2, 1.4, 3, wood); m3Tri(M, m3W(M, 0.05, 1.5, 0), m3W(M, 0.05, 0.45, 0), m3W(M, 0.8, 0.5, 0), [0.95, 0.92, 0.84]); }
+    m3Put(M, S, 3.4, 1.65, 0); m3Boat(M, 0, 0, 0.78); }
+  else if (t === "bridge"){ const ca = Math.cos(f.ang || 0) * 0.052 * (f.sc || 1), sa = Math.sin(f.ang || 0) * 0.052 * (f.sc || 1), gL = m3Gy(S.wx + ca, S.wz + sa), gR = m3Gy(S.wx - ca, S.wz - sa); m3Put(M, S, 0, 0, 0); const g0 = M.oy, top = Math.max(gL, gR, g0 + 0.004) + 0.002; M.oy = top; const drop = (top - g0) / S.k + 0.3, span = 5, deck = 0.28, halfZ = 0.56, segs = 12;
+    m3Box(M, 0, 0, span * 2, 1.25, 0, deck, P.stone); m3Box(M, 0, 0.61, span * 2, 0.12, deck, 0.24, P.stoneD); m3Box(M, 0, -0.61, span * 2, 0.12, deck, 0.24, P.stoneD);
+    for (const side of [-1, 1]) for (let i = 0; i < segs; i++){ const x0 = -span + span * 2 * i / segs, x1 = -span + span * 2 * (i + 1) / segs, curve0 = 0.025 + 0.15 * (1 - (x0 / span) ** 2), curve1 = 0.025 + 0.15 * (1 - (x1 / span) ** 2), z = side * halfZ, col = m3Tint(P.stone, i % 2 ? 0.91 : 1.02);
+      m3Quad(M, m3W(M, x0, curve0, z), m3W(M, x1, curve1, z), m3W(M, x1, deck, z), m3W(M, x0, deck, z), col); }
+    for (const x of [-4.45, 4.45]) m3Box(M, x, 0, 0.74, 1.12, -drop, drop, P.stoneD);
+    for (let i = -4; i <= 4; i += 2) m3Box(M, i, 0, 0.07, 0.94, deck + 0.004, 0.018, i % 2 ? m3Tint(P.stone, 0.82) : M3C.cream); }
   else if (t === "monument"){ m3Put(M, S, 0, 0, 0); m3Box(M, 0, 0, 1.4, 1.4, 0, 0.35, P.stoneD); m3Frus(M, 0, 0, 0.7, 0.7, 0.36, 0.36, 0.35, 4.4, S.st === "sahel" ? P.walls[1] : P.stone); m3Pyr(M, 0, 0, 0.36, 0.36, 4.75, 0.45, M3C.gold || [0.86, 0.7, 0.3]); }
   else if (t === "tomb"){ m3Put(M, S, 0, 0, 0); if (S.st === "mideast" || S.st === "sahel"){ m3Pyr(M, 0, 0, 6.2, 6.2, 0, 4.4, S.st === "sahel" ? P.walls[2] : [0.86, 0.78, 0.58]); m3Box(M, 0, 3.1, 0.7, 0.2, 0, 0.9, M3_DARK); }
     else if (S.st === "eastasia"){ for (let k = 0; k < 4; k++){ const w = 2.2 - k * 0.42; m3Box(M, 0, 0, w, w, k * 0.95, 0.7, P.walls[0]); m3Eave(M, 0, 0, w, w, k * 0.95 + 0.7, S.roof); } }
     else { m3Dome(M, 0, 0, 3.0, 0, 8, [0.40, 0.52, 0.28]); m3Box(M, 0, 2.7, 1.0, 0.9, 0, 0.9, P.stone); m3Box(M, 0, 3.1, 0.5, 0.2, 0, 0.7, M3_DARK); } } }
 function m3WallLine(M, f){ const mid = f.cells[Math.floor(f.cells.length / 2)], S = m3SFor({ sunk: f.sunk }, mid); S.wx = 0; S.wz = 0; S.rot = 0; const k = S.k, h = 1.4 + (f.sz || 5) * 0.06, pts = [];
   for (let n = 0; n < f.cells.length; n += 2){ const c = f.cells[n]; pts.push([(cx(c) + 0.5 - W / 2) / M3_U / k, (cy(c) + 0.5 - H / 2) / M3_U / k, c]); } const last = f.cells[f.cells.length - 1]; pts.push([(cx(last) + 0.5 - W / 2) / M3_U / k, (cy(last) + 0.5 - H / 2) / M3_U / k, last]);
-  for (let n = 0; n < pts.length - 1; n++){ const a = pts[n], b = pts[n + 1]; if (!f.sunk && !G.C.isLand(a[2]) && !G.C.isLand(b[2])) continue; m3Wall(M, S, a, b, h, 0.45, S.P.stone); }
+  const P = G.P, riverCells = new Set(); for (const q of feats()) if (q.cells && ["river", "stream", "canal"].includes(q.type)) for (const c of q.cells) riverCells.add(c); const river = c => riverCells.has(c) || !!(P.flux && P.flux[c] > P.riverT && P.elev[c] >= 0), crossed = new Set();
+  for (let n = 0; n < pts.length - 1; n++){ const a = pts[n], b = pts[n + 1]; if (!f.sunk && !G.C.isLand(a[2]) && !G.C.isLand(b[2])) continue;
+    if (river(a[2]) || river(b[2])){ const c = river(a[2]) ? a[2] : b[2]; if (!crossed.has(c) && G.C.isLand(a[2]) && G.C.isLand(b[2])){ crossed.add(c); const ang = Math.atan2(cy(b[2]) - cy(a[2]), cx(b[2]) - cx(a[2])); m3Landmark(M, { i: c, type: "bridge", ang, sc: 1 }); m3Box(M, 0, 0, 9.5, 0.34, 0.28, h, S.P.stone); for (let x = -4; x <= 4; x += 2) m3Box(M, x, 0, 0.24, 0.38, 0.28 + h, 0.24, S.P.stoneD); } continue; }
+    m3Wall(M, S, a, b, h, 0.45, S.P.stone); }
   pts.forEach((p, n) => { if ((n % 3 === 0 || n === pts.length - 1) && G.C.isLand(p[2])){ m3Put(M, S, p[0], p[1], 0); m3WallTowerS(M, S, h + 0.2, false); } }); }
 function m3FallsS(M, f){ if (!G.C.isLand(f.i)) return; const a = f.ang != null ? f.ang : Math.PI / 2, ux = Math.cos(a), uy = Math.sin(a), vx = -uy, vy = ux, w = Math.max(0.25, (f.r || 1.2) * 0.4), gx = cx(f.i), gy = cy(f.i);
   const at = (along, across) => { const x = gx + ux * along + vx * across, y = gy + uy * along + vy * across; return [(x + 0.5 - W / 2) / M3_U, (y + 0.5 - H / 2) / M3_U]; };
@@ -9517,7 +9638,11 @@ function dragEnd(){ const t = DRAG2.t; DRAG2.t = null; if (!t) return; if (!DRAG
       if (hit && hit.key === sel.key){ ev.preventDefault(); ev.stopPropagation(); try { ev.target.setPointerCapture(ev.pointerId); } catch (e) {} dragStart(sel, g[0], g[1]); live = ev.pointerId; return; }
       if (ME.tool === "look" && !hit){ selectThing(null); } }, true);
     window.addEventListener("pointermove", ev => { if (live !== ev.pointerId || !DRAG2.t) return; const g = gridAt(ev); if (g) dragTo(g[0], g[1]); ev.preventDefault(); }, { passive: false });
-    const up = ev => { if (live !== ev.pointerId) return; live = null; dragEnd(); }; window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+    const up = ev => { if (live !== ev.pointerId) return; live = null; dragEnd(); };
+    const cancel = () => { if (live == null) return; live = null; dragEnd(); };
+    window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up); window.addEventListener("blur", cancel);
+    document.addEventListener("visibilitychange", () => { if (document.hidden) cancel(); });
+    fr.addEventListener("lostpointercapture", ev => { if (live === ev.pointerId) cancel(); });
     document.addEventListener("keydown", ev => { if (ev.key === "Escape" && SEL2.key && !mapTyping(ev.target)){ selectThing(null); } });
     const cv = $("#map"); cv.addEventListener("pointermove", ev => { RING_PT = ev.pointerType || "mouse"; }); cv.addEventListener("pointerleave", () => { const el = $("#ring2"); if (el) el.hidden = true; }); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire); else wire(); })();
